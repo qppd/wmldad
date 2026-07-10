@@ -2,7 +2,7 @@
 
 > **Primary Model:** XGBoost (Gradient-Boosted Decision Trees)
 > **Secondary Model:** Isolation Forest (Unsupervised Anomaly Detection)
-> **Training Location:** Google Colab / Jupyter Notebook
+> **Training Location:** Google Colab or Jupyter Notebook
 > **Inference Location:** PythonAnywhere (server-side)
 
 ---
@@ -385,6 +385,9 @@ def generate_training_data(n_samples=100000):
 ---
 
 ## Model Retraining Pipeline
+
+Models are retrained in **Google Colab or Jupyter Notebook** using `training/water_meter_ml_training.ipynb`.
+After retraining, export the model files and upload to PythonAnywhere.
 
 ```python
 # Scheduled daily on PythonAnywhere

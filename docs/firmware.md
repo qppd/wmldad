@@ -11,7 +11,7 @@
 
 ```
 src/
-├── main.cpp                    # Entry point: setup() + loop()
+├── water-meter.ino             # Main Arduino sketch (setup() + loop())
 ├── config.h                    # All configurable parameters
 ├── config.example.h            # Template (safe for git)
 ├── sensor_manager.h            # Manages 5 sensor ISRs
@@ -27,9 +27,6 @@ src/
 ├── ota_updater.h               # OTA firmware updates
 └── led_indicator.h             # Status LED patterns
 
-data/
-├── firebase_ca_cert.h          # Firebase SSL root CA certificate
-└── device_config.json           # Device settings (read from SPIFFS)
 ```
 
 ---

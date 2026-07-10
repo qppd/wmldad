@@ -349,9 +349,16 @@ For testing without actual plumbing:
 ### Quick Training
 
 ```bash
-Run the data generation cell in the training notebook        # Generate 100,000 synthetic samples
-python train_xgboost.py        # Train XGBoost model
-Run the Isolation Forest training cell in the notebook  # Train anomaly detector
+# Option A: Google Colab (recommended - no setup needed)
+#    1. Upload training/water_meter_ml_training.ipynb to Google Drive
+#    2. Open with Google Colab (colab.research.google.com)
+#    3. Runtime -> Run all
+#    Models are saved to model/ folder automatically
+
+# Option B: Jupyter Notebook (local)
+cd training/
+pip install -r requirements.txt
+jupyter notebook water_meter_ml_training.ipynb
 ```
 
 Expected output:
@@ -364,11 +371,15 @@ Classification Report:
  major_leak      0.95      0.94      0.94
 ```
 
-Move trained models to PythonAnywhere:
+Move trained models to PythonAnywhere (after training in Colab/Jupyter):
 ```bash
-cp xgboost_leak_model.json ../pythonanywhere/models/
-cp isolation_forest.pkl ../pythonanywhere/models/
-cp scaler.pkl ../pythonanywhere/models/
+# From Google Colab: download model files from the Files tab
+# (they appear as xgboost_leak_model.json, isolation_forest.pkl, scaler.pkl)
+
+# From Jupyter (local):
+cp training/xgboost_leak_model.json pythonanywhere/models/
+cp training/isolation_forest.pkl pythonanywhere/models/
+cp training/scaler.pkl pythonanywhere/models/
 ```
 
 ---
