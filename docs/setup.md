@@ -50,8 +50,7 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 
 | Software | Purpose | Download |
 |----------|---------|----------|
-| **VS Code** | Code editor | [code.visualstudio.com](https://code.visualstudio.com/) |
-| **Arduino IDE 2.x** | ESP32 build & upload, Serial Monitor | [arduino.cc](https://www.arduino.cc/en/software) |
+| **Arduino IDE 2.x** | ESP32 build, upload, Serial Monitor | [arduino.cc](https://www.arduino.cc/en/software) |
 | **Python 3.9+** | ML training + backend | [python.org](https://www.python.org/) |
 | **Git** | Version control | [git-scm.com](https://git-scm.com/) |
 | **Google Chrome / Firefox** | Firebase console | — |
@@ -61,13 +60,19 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 
 ## Phase 2: Software Installation
 
-### Step 2.1: Install VS Code + Arduino IDE
+### Step 2.1: Install Arduino IDE
 
-1. Download and install VS Code
-2. Open VS Code → Extensions (Ctrl+Shift+X)
-3. Search **"Arduino IDE IDE"** → Install
-4. Wait for installation (Arduino IDE downloads toolchains — may take 5–10 min)
-5. Restart VS Code
+1. Download Arduino IDE 2.x from [arduino.cc](https://www.arduino.cc/en/software)
+2. Install and open Arduino IDE
+3. Add ESP32 board support:
+   - File -> Preferences -> Additional Board Manager URLs
+   - Add: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
+   - Tools -> Board -> Boards Manager -> search **ESP32** -> install **ESP32 Arduino**
+4. Install required libraries via Library Manager (Tools -> Manage Libraries):
+   - `Firebase ESP Client` by mobizt
+   - `ArduinoJson` by bblanchon
+   - `Adafruit SSD1306` by Adafruit
+   - `Adafruit GFX Library` by Adafruit
 
 ### Step 2.2: Install Python
 
@@ -86,11 +91,9 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 git clone https://github.com/qppd/water-meter.git
 cd water-meter
 
-# Open in VS Code
-code .
 ```
 
-### Step 2.4: Install Python Dependencies
+### Step 2.4: Install Python Dependencies (for ML Backend)
 
 ```bash
 cd training/
@@ -237,7 +240,7 @@ For testing without actual plumbing:
 
 ### Step 5.1: Configure Firmware
 
-1. In VS Code, open `src/config.example.h`
+1. Open `src/config.example.h` in any text editor
 2. Create `src/config.h` (copy the example)
 3. Fill in your credentials:
 
@@ -257,10 +260,12 @@ For testing without actual plumbing:
 ### Step 5.2: Upload Firmware
 
 1. Connect ESP32 via USB cable
-2. In VS Code, click the **Arduino IDE icon** (alien head in sidebar)
-3. Click **Build** ( checkmark) or press Ctrl+Alt+B
-4. Wait for compilation to finish
-5. Click **Upload** (→ arrow) or press Ctrl+Alt+U
+2. In Arduino IDE, select your board:
+   - **Tools -> Board -> ESP32 Arduino -> NodeMCU-32S**
+3. Select the correct port:
+   - **Tools -> Port -> COMx** (check Windows Device Manager for the COM port)
+4. Click **Sketch -> Verify/Compile** (Ctrl+R) to check for errors
+5. Click **Sketch -> Upload** (Ctrl+U) to flash the ESP32
 6. If upload fails:
    - Hold **BOOT** button on ESP32
    - Press **EN** (reset) while holding BOOT
@@ -269,8 +274,8 @@ For testing without actual plumbing:
 
 ### Step 5.3: Monitor Serial Output
 
-1. Click the **Serial Monitor** plug icon in Arduino IDE (or Ctrl+Alt+M)
-2. Set baud rate to **115200**
+1. Open **Tools -> Serial Monitor** (Ctrl+Shift+M)
+2. Set baud rate to **115200** (bottom-right of Serial Monitor window)
 3. You should see:
    ```
    Connecting to WiFi...
@@ -459,24 +464,28 @@ cp training/scaler.pkl pythonanywhere/models/
 ## Quick Reference: Common Commands
 
 ```bash
-# Arduino IDE build
-Compile in Arduino IDE (Sketch -> Verify/Compile)
+# Arduino IDE: Verify/Compile
+#   Sketch -> Verify/Compile  (Ctrl+R)
 
-# Arduino IDE upload
-Compile in Arduino IDE (Sketch -> Verify/Compile) --target upload
+# Arduino IDE: Upload to ESP32
+#   Sketch -> Upload  (Ctrl+U)
 
-# Arduino IDE monitor
-Open Serial Monitor (Tools -> Serial Monitor, 115200 baud)
+# Arduino IDE: Serial Monitor
+#   Tools -> Serial Monitor  (Ctrl+Shift+M)  @ 115200 baud
 
-# Train ML model
-Run the `water_meter_ml_training.ipynb` notebook
-in Google Colab or Jupyter Notebook
+# Train ML model (Google Colab)
+#   Open training/water_meter_ml_training.ipynb
+#   Runtime -> Run all
+
+# Train ML model (Jupyter Notebook)
+cd training/
+jupyter notebook water_meter_ml_training.ipynb
 
 # Run Flask app locally
 cd pythonanywhere/ && python app.py
 
 # View PythonAnywhere logs
-# Web tab → Logs → view server/error log
+# Web tab -> Logs -> view server/error log
 
 # Firebase backup (via CLI)
 firebase database:get /readings > backup.json

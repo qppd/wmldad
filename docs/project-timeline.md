@@ -43,7 +43,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Order and receive all components |
-|  **Tasks** | • Order from Makerlab Electronics (Shopee/Lazada)<br/>• Buy PVC fittings from local hardware store<br/>• Download all software (VS Code, Arduino IDE, Python)<br/>• Create Firebase project<br/>• Sign up for PythonAnywhere |
+|  **Tasks** | • Order from Makerlab Electronics (Shopee/Lazada)<br/>• Buy PVC fittings from local hardware store<br/>• Download all software (Arduino IDE, Python)<br/>• Create Firebase project<br/>• Sign up for PythonAnywhere |
 |  **Deliverable** | All hardware received, software tools installed, Firebase project created |
 |  **Risk** | Use 4–5 sellers only. Check reviews before ordering. Have backup sellers. |
 
@@ -105,7 +105,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Train XGBoost + Isolation Forest on simulated data |
-|  **Tasks** | • Generate synthetic training data (100K samples)<br/>• Implement feature extraction<br/>• Train XGBoost classifier<br/>• Train Isolation Forest for anomaly detection<br/>• Export models (JSON + PKL)<br/>• Evaluate: accuracy, precision, recall, F1<br/>• Move models to PythonAnywhere |
+|  **Tasks** | • Generate synthetic training data (100K samples) in the notebook<br/>• Implement feature extraction in `water_meter_ml_training.ipynb`<br/>• Train XGBoost classifier (Google Colab or Jupyter)<br/>• Train Isolation Forest for anomaly detection<br/>• Export models (JSON + PKL)<br/>• Evaluate: accuracy, precision, recall, F1<br/>• Download trained models from Colab or local, upload to PythonAnywhere |
 |  **Deliverable** | XGBoost model with ≥ 95% accuracy on validation set. Isolation Forest trained on normal data. |
 |  **Risk** | Synthetic data ≠ real data. Model will need retraining after collecting real usage data. |
 
