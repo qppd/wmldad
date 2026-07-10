@@ -2,6 +2,7 @@
 
 > **Primary Model:** XGBoost (Gradient-Boosted Decision Trees)
 > **Secondary Model:** Isolation Forest (Unsupervised Anomaly Detection)
+> **Training Location:** Google Colab / Jupyter Notebook
 > **Inference Location:** PythonAnywhere (server-side)
 
 ---
@@ -118,7 +119,15 @@ def extract_features(data, sensor_id, fixture_count=5):
 
 ## XGBoost Model Training
 
-### Training Script
+### Training Notebook (Google Colab / Jupyter)
+
+The complete training pipeline is in `training/water_meter_ml_training.ipynb`.
+Open this notebook in Google Colab or local Jupyter Notebook:
+
+1. **Google Colab (recommended):** Upload the notebook to Google Drive, open with Colab, enable GPU runtime (Runtime -> Change runtime type -> T4 GPU)
+2. **Jupyter Notebook (local):** `cd training/ && pip install -r requirements.txt && jupyter notebook water_meter_ml_training.ipynb`
+
+### Key Training Cells
 
 ```python
 import pandas as pd

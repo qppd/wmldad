@@ -32,7 +32,7 @@
 | Layer | Technology | Version | Purpose |
 |-------|------------|---------|---------|
 | **Framework** | Arduino framework (esp32 core) | ≥ 2.0.x | Mature, well-documented, large ecosystem |
-| **IDE** | PlatformIO (VS Code) | Latest | Best dependency management, CLI build, library auto-install |
+| **IDE** | Arduino IDE (VS Code) | Latest | Best dependency management, CLI build, library auto-install |
 | **Language** | C++11/Arduino | — | Standard for ESP32 |
 | **Firebase** | [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) | ≥ 4.4.x | Full Firebase Realtime DB support — push, set, update, stream, auth |
 | **JSON** | ArduinoJson | ≥ 7.x | Payload serialization for Firebase |
@@ -173,8 +173,8 @@ if (fbData.streamAvailable()) {
 
 | Tool | Purpose |
 |------|---------|
-| **PlatformIO** | Build, upload, and debug ESP32 firmware |
-| **VS Code** | Primary IDE for firmware + backend |
+| **Arduino IDE** | Build, upload, and debug ESP32 firmware |
+| **Arduino IDE** | Primary IDE for firmware |
 | **Python 3.9+** | ML training, backend development |
 | **Jupyter / Google Colab** | ML model prototyping and experimentation |
 | **Firebase Console** | Database management, rules, authentication |

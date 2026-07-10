@@ -122,17 +122,21 @@ cd water-meter
 #    - Download service account JSON
 #    - Configure Firebase credentials in ESP32 firmware
 
-# 3. Upload ESP32 firmware (PlatformIO)
-pio run --target upload
+# 3. Upload ESP32 firmware (Arduino IDE)
+#    - Open src/water-meter.ino in Arduino IDE
+#    - Select board: Tools -> Board -> ESP32 Arduino -> NodeMCU-32S
+#    - Select port: Tools -> Port -> COMx
+#    - Click Sketch -> Upload (Ctrl+U)
 
 # 4. Deploy PythonAnywhere backend
-#    - Upload the pythonanywhere/ folder
-#    - Configure Pyrebase4
+#    - Upload the pythonanywhere/ folder to PythonAnywhere
+#    - Configure Pyrebase4 with your Firebase credentials
 #    - Set up Flask web app
 
 # 5. Train the model
-cd training/
-python train_xgboost.py
+#    - Upload training/water_meter_ml_training.ipynb to Google Colab
+#    - Run all cells (Runtime -> Run all)
+#    - Trained models are saved to model/ folder
 ```
 
 See [Setup Guide](./docs/setup.md) for complete step-by-step instructions.
@@ -173,31 +177,34 @@ water-meter/
 │   ├── bom.md
 │   ├── troubleshooting.md
 │   └── project-timeline.md
-├── src/                      # ESP32 firmware (Arduino C++)
-│   ├── main.cpp
-│   ├── config.h
-│   ├── sensor_manager.h
-│   ├── firebase_client.h
-│   ├── flow_sensor.h
-│   ├── valve_controller.h
-│   └── ...
+├── src/                      # ESP32 firmware (Arduino C++ / .ino)
+│   ├── water-meter.ino          # Main Arduino sketch
+│   ├── config.h                 # WiFi, Firebase, sensor config
+│   ├── sensor_manager.h         # 5 sensor ISR management
+│   ├── flow_sensor.h            # Pulse counter class
+│   ├── firebase_client.h        # Firebase-ESP-Client wrapper
+│   ├── local_rules.h            # Offline leak detection
+│   ├── valve_controller.h       # Relay/solenoid control
+│   ├── wifi_manager.h           # WiFi connect + reconnect
+│   ├── data_logger.h            # SD card + SPIFFS logging
+│   ├── display_manager.h        # OLED 128x64
+│   ├── alert_manager.h          # Buzzer + LED alerts
+│   ├── ntp_sync.h               # NTP time sync
+│   └── led_indicator.h          # Status LED patterns
 ├── pythonanywhere/           # PythonAnywhere backend
 │   ├── app.py                # Flask web app
 │   ├── firebase_listener.py  # Pyrebase4 stream listener
 │   ├── ml_inference.py       # XGBoost + Isolation Forest
 │   ├── alert_engine.py       # Notification system
 │   └── requirements.txt
-├── training/                  # ML training scripts
-│   ├── train_xgboost.py
-│   ├── feature_engineering.py
-│   ├── train_isolation_forest.py
-│   └── simulate_data.py
+├── training/                  # ML training notebooks
+│   ├── water_meter_ml_training.ipynb   # Main training notebook (Colab/Jupyter)
+│   └── requirements.txt                # Dependencies for local runs
 ├── model/                    # Trained models
 │   ├── xgboost_model.json
 │   └── isolation_forest.pkl
 ├── hardware/                  # CAD, Fritzing, enclosure designs
 │   └── water-meter-wiring.fzz
-├── platformio.ini
 └── README.md
 ```
 

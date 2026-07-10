@@ -1,6 +1,6 @@
 # Firmware Architecture — ESP32 with Firebase-ESP-Client
 
-> **Framework:** Arduino (ESP32 Core) via PlatformIO
+> **Framework:** Arduino (ESP32 Core) via Arduino IDE
 > **Firebase Client:** [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) v4.4+
 > **Communication:** HTTPS + SSE Stream
 > **Sensor Count:** 5 flow sensors (1 inlet + 4 fixtures)
@@ -354,36 +354,46 @@ These run on the ESP32 when Firebase/ML is unreachable — they're less accurate
 
 ## Build and Upload
 
-### PlatformIO
+### Arduino IDE Setup
 
-```ini
-; platformio.ini
-[env:esp32dev]
-platform = espressif32
-board = node32s
-framework = arduino
-monitor_speed = 115200
+1. Install **Arduino IDE 2.x** from [arduino.cc](https://www.arduino.cc/en/software)
+2. Add ESP32 board support:
+   - File -> Preferences -> Additional Board Manager URLs
+   - Add: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
+   - Tools -> Board -> Boards Manager -> search "ESP32" -> install "ESP32 Arduino"
+3. Select your board: **Tools -> Board -> ESP32 Arduino -> NodeMCU-32S**
+4. Select port: **Tools -> Port -> COMx** (check Windows Device Manager)
+5. Install libraries via Library Manager (Tools -> Manage Libraries):
+   - `Firebase ESP Client` by mobizt
+   - `ArduinoJson` by bblanchon
+   - `Adafruit SSD1306` by Adafruit
+   - `Adafruit GFX Library` by Adafruit
 
-lib_deps =
-    mobizt/Firebase-ESP-Client@^4.4.8
-    bblanchon/ArduinoJson@^7.0.0
-    adafruit/Adafruit SSD1306@^2.5.0
-    adafruit/Adafruit GFX Library@^1.11.0
-```
+### Required Libraries
 
-```bash
-# Build
-pio run
+| Library | Version | Purpose |
+|---------|---------|---------|
+| Firebase-ESP-Client | 4.4+ | Firebase Realtime DB (push, set, stream) |
+| ArduinoJson | 7+ | JSON payload serialization |
+| Adafruit SSD1306 | 2.5+ | OLED display driver |
+| Adafruit GFX Library | 1.11+ | OLED graphics primitives |
 
-# Upload
-pio run --target upload
+### Compile and Upload
 
-# Monitor
-pio device monitor --baud 115200
+1. Open `src/water-meter.ino` in Arduino IDE
+2. Click **Sketch -> Verify/Compile** (Ctrl+R) to check for errors
+3. Click **Sketch -> Upload** (Ctrl+U) to flash to ESP32
+4. If upload fails:
+   - Hold **BOOT** button on ESP32
+   - Press **EN** (reset) while holding BOOT
+   - Release EN, then release BOOT
+   - Click Upload again
 
-# Upload filesystem (for SPIFFS data)
-pio run --target uploadfs
-```
+### Serial Monitor
+
+1. Open **Tools -> Serial Monitor** (Ctrl+Shift+M)
+2. Set baud rate to **115200** (bottom-right of Serial Monitor window)
+3. You should see startup logs from the ESP32
 
 ---
 

@@ -51,7 +51,7 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 | Software | Purpose | Download |
 |----------|---------|----------|
 | **VS Code** | Code editor | [code.visualstudio.com](https://code.visualstudio.com/) |
-| **PlatformIO** (VS Code extension) | ESP32 build & upload | Install from VS Code Extensions |
+| **Arduino IDE 2.x** | ESP32 build & upload, Serial Monitor | [arduino.cc](https://www.arduino.cc/en/software) |
 | **Python 3.9+** | ML training + backend | [python.org](https://www.python.org/) |
 | **Git** | Version control | [git-scm.com](https://git-scm.com/) |
 | **Google Chrome / Firefox** | Firebase console | — |
@@ -61,12 +61,12 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 
 ## Phase 2: Software Installation
 
-### Step 2.1: Install VS Code + PlatformIO
+### Step 2.1: Install VS Code + Arduino IDE
 
 1. Download and install VS Code
 2. Open VS Code → Extensions (Ctrl+Shift+X)
-3. Search **"PlatformIO IDE"** → Install
-4. Wait for installation (PlatformIO downloads toolchains — may take 5–10 min)
+3. Search **"Arduino IDE IDE"** → Install
+4. Wait for installation (Arduino IDE downloads toolchains — may take 5–10 min)
 5. Restart VS Code
 
 ### Step 2.2: Install Python
@@ -257,7 +257,7 @@ For testing without actual plumbing:
 ### Step 5.2: Upload Firmware
 
 1. Connect ESP32 via USB cable
-2. In VS Code, click the **PlatformIO icon** (alien head in sidebar)
+2. In VS Code, click the **Arduino IDE icon** (alien head in sidebar)
 3. Click **Build** ( checkmark) or press Ctrl+Alt+B
 4. Wait for compilation to finish
 5. Click **Upload** (→ arrow) or press Ctrl+Alt+U
@@ -269,7 +269,7 @@ For testing without actual plumbing:
 
 ### Step 5.3: Monitor Serial Output
 
-1. Click the **Serial Monitor** plug icon in PlatformIO (or Ctrl+Alt+M)
+1. Click the **Serial Monitor** plug icon in Arduino IDE (or Ctrl+Alt+M)
 2. Set baud rate to **115200**
 3. You should see:
    ```
@@ -349,10 +349,9 @@ For testing without actual plumbing:
 ### Quick Training
 
 ```bash
-cd training/
-python simulate_data.py        # Generate 100,000 synthetic samples
+Run the data generation cell in the training notebook        # Generate 100,000 synthetic samples
 python train_xgboost.py        # Train XGBoost model
-python train_isolation_forest.py  # Train anomaly detector
+Run the Isolation Forest training cell in the notebook  # Train anomaly detector
 ```
 
 Expected output:
@@ -449,17 +448,18 @@ cp scaler.pkl ../pythonanywhere/models/
 ## Quick Reference: Common Commands
 
 ```bash
-# PlatformIO build
-pio run
+# Arduino IDE build
+Compile in Arduino IDE (Sketch -> Verify/Compile)
 
-# PlatformIO upload
-pio run --target upload
+# Arduino IDE upload
+Compile in Arduino IDE (Sketch -> Verify/Compile) --target upload
 
-# PlatformIO monitor
-pio device monitor --baud 115200
+# Arduino IDE monitor
+Open Serial Monitor (Tools -> Serial Monitor, 115200 baud)
 
 # Train ML model
-cd training/ && python train_xgboost.py
+Run the `water_meter_ml_training.ipynb` notebook
+in Google Colab or Jupyter Notebook
 
 # Run Flask app locally
 cd pythonanywhere/ && python app.py

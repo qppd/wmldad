@@ -43,7 +43,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Order and receive all components |
-|  **Tasks** | • Order from Makerlab Electronics (Shopee/Lazada)<br/>• Buy PVC fittings from local hardware store<br/>• Download all software (VS Code, PlatformIO, Python)<br/>• Create Firebase project<br/>• Sign up for PythonAnywhere |
+|  **Tasks** | • Order from Makerlab Electronics (Shopee/Lazada)<br/>• Buy PVC fittings from local hardware store<br/>• Download all software (VS Code, Arduino IDE, Python)<br/>• Create Firebase project<br/>• Sign up for PythonAnywhere |
 |  **Deliverable** | All hardware received, software tools installed, Firebase project created |
 |  **Risk** | Use 4–5 sellers only. Check reviews before ordering. Have backup sellers. |
 
@@ -56,7 +56,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Assemble ESP32 with 1 flow sensor and verify reading |
-|  **Tasks** | • Mount ESP32 on expansion board<br/>• Wire 1 YF-S201 sensor to GPIO 34 with pull-up resistor<br/>• Install PlatformIO, clone repo<br/>• Upload test firmware<br/>• Verify pulse counting via Serial Monitor<br/>• Test with manual switch (touch sensor wire to 3.3V) |
+|  **Tasks** | • Mount ESP32 on expansion board<br/>• Wire 1 YF-S201 sensor to GPIO 34 with pull-up resistor<br/>• Install Arduino IDE, clone repo<br/>• Upload test firmware<br/>• Verify pulse counting via Serial Monitor<br/>• Test with manual switch (touch sensor wire to 3.3V) |
 |  **Deliverable** | Working ESP32 + 1 flow sensor, Serial Monitor showing pulse counts |
 |  **Risk** | Common: wrong GPIO, missing pull-up resistor, charge-only USB cable |
 
