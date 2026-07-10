@@ -2,119 +2,155 @@
 
 ## Overview
 
-Smart water monitoring system with **fixture-level leak detection**. Uses 1 inlet flow sensor + 4 fixture flow sensors to detect leaks and anomalies via a Random Forest machine learning model.
+Smart water monitoring system with **fixture-level leak detection** using **ESP32 → Firebase → PythonAnywhere → XGBoost ML**.
+
+The system uses 1 inlet flow sensor to measure total consumption and 4 fixture flow sensors to monitor individual water outlets. Data flows from the ESP32 to Firebase Realtime DB via the [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) library (stream + regular calls). A PythonAnywhere backend consumes the Firebase data using Pyrebase4, runs **XGBoost** and **Isolation Forest** ML models, and serves a web dashboard.
+
+---
 
 ## Architecture Diagram
 
 ```mermaid
 graph TB
-    subgraph "Water Supply"
-        A[Main Water Line] --> B[Inlet Flow Sensor]
+    subgraph "Plumbing Layer"
+        A[Main Water Supply] --> B[Inlet Flow Sensor<br/>YF-S201]
         B --> C[Check Valve]
-        C --> D{Junction}
+        C --> D[Junction]
+        D --> E1[Fixture 1 Sensor]
+        D --> E2[Fixture 2 Sensor]
+        D --> E3[Fixture 3 Sensor]
+        D --> E4[Fixture 4 Sensor]
+        E1 --> CV1[Check Valve] --> F1[Fixture 1]
+        E2 --> CV2[Check Valve] --> F2[Fixture 2]
+        E3 --> CV3[Check Valve] --> F3[Fixture 3]
+        E4 --> CV4[Check Valve] --> F4[Fixture 4]
     end
-    
-    subgraph "Fixture Sensors"
-        D --> E[Fixture 1 Sensor]
-        D --> F[Fixture 2 Sensor]
-        D --> G[Fixture 3 Sensor]
-        D --> H[Fixture 4 Sensor]
-        E --> E1[Check Valve]
-        F --> F1[Check Valve]
-        G --> G1[Check Valve]
-        H --> H1[Check Valve]
-        E1 --> I1[Faucet / Toilet / Fixture 1]
-        F1 --> I2[Faucet / Toilet / Fixture 2]
-        G1 --> I3[Faucet / Toilet / Fixture 3]
-        H1 --> I4[Faucet / Toilet / Fixture 4]
-    end
-    
-    subgraph "ESP32 Edge Node"
-        J[Inlet Pulse Counter]
-        K[Fixture 1 Pulse Counter]
-        L[Fixture 2 Pulse Counter]
-        M[Fixture 3 Pulse Counter]
-        N[Fixture 4 Pulse Counter]
-        O[Feature Extractor]
-        P[Random Forest Classifier]
-        Q[Relay Controller]
-        R[Solenoid Valves]
+
+    subgraph "ESP32 Edge Layer"
+        direction TB
+        Sensors["5× Flow Sensor<br/>Pulse Counters<br/>(ISR + Debounce)"]
+        Features["Feature Extractor<br/>flow_rate, volume,<br/>duration, time, ratio"]
+        FirebaseClient["Firebase-ESP-Client<br/>Stream + Write"]
+        LocalCtrl["Local Leak Rules<br/>Valve Control<br/>OLED Display"]
+        SDCard["SD Card Logger<br/>(Offline Backup)"]
         
-        B --> J
-        E --> K
-        F --> L
-        G --> M
-        H --> N
+        Sensors --> Features
+        Features --> FirebaseClient
+        Features --> LocalCtrl
+        Sensors --> SDCard
+    end
+
+    subgraph "Firebase Realtime DB"
+        direction TB
+        Readings["/readings/{device_id}/{ts}<br/>Raw sensor data"]
+        Alerts["/alerts/{alert_id}<br/>Leak events"]
+        Commands["/commands/{device_id}<br/>Valve control"]
+        Models["/models/{version}<br/>ML metadata"]
+    end
+
+    subgraph "PythonAnywhere Backend"
+        direction TB
+        Pyrebase["Pyrebase4 Listener<br/>(Stream + REST)"]
+        XGB["XGBoost Classifier<br/>normal / minor_leak / major_leak"]
+        ISO["Isolation Forest<br/>Unsupervised Anomaly Detection"]
+        Flask["Flask Web App<br/>Dashboard + API"]
+        AlertEngine["Alert Engine<br/>Email / Telegram"]
+        Retrain["Daily Retrain Pipeline"]
         
-        J --> O
-        K --> O
-        L --> O
-        M --> O
-        N --> O
-        
-        O --> P
-        P -->|Leak Detected| Q
-        Q --> R
+        Pyrebase --> XGB
+        Pyrebase --> ISO
+        XGB --> Flask
+        ISO --> Flask
+        Flask --> AlertEngine
+        Flask --> Retrain
     end
+
+    subgraph "User Layer"
+        Dashboard["Web Dashboard<br/>Real-time Charts"]
+        Notif["Telegram / Email<br/>Alerts"]
+        ValveCmd["Remote Valve<br/>Control"]
+    end
+
+    B --> Sensors
+    E1 --> Sensors
+    E2 --> Sensors
+    E3 --> Sensors
+    E4 --> Sensors
     
-    subgraph "Communication"
-        O --> S[WiFi Module]
-        S --> T{Protocol}
-        T -->|HTTP REST| U[Backend API]
-        T -->|MQTT| V[MQTT Broker]
-    end
+    FirebaseClient --> Readings
+    FirebaseClient --> Alerts
+    Commands --> FirebaseClient
     
-    subgraph "Cloud / Backend"
-        U --> W[API Server]
-        V --> W
-        W --> X[Database]
-        W --> Y[Notification Service]
-        X --> Z[Retrain Pipeline]
-        Z --> Z2[Improved Model → ESP32 OTA]
-    end
+    Readings --> Pyrebase
+    Alerts --> Pyrebase
+    Commands --> Pyrebase
     
-    subgraph "Dashboard"
-        X --> AA[Web Dashboard]
-        Y --> AB[Alerts / Telegram / SMS]
-        AA --> AC[User]
-    end
+    Flask --> Dashboard
+    AlertEngine --> Notif
+    Dashboard --> ValveCmd
+    ValveCmd --> Commands
 ```
 
-## System Flow
+---
 
-1. **Inlet sensor** measures total water entering the system
-2. **4 fixture sensors** measure individual consumption per fixture
-3. **ESP32** reads all 5 sensors via hardware interrupts
-4. **Feature extraction** computes per-fixture metrics: flow rate, duration, start/end times, daily patterns
-5. **Random Forest model** (TFLite Micro) classifies each event as:
-   - ✅ Normal usage
-   - ⚠️ Minor leak (drip)
-   - 🚨 Major leak (burst / stuck valve)
-   - ❓ Anomaly (unrecognized pattern)
-6. **If leak detected** → ESP32 triggers relay → closes solenoid valve on that fixture
-7. **Data logged** locally (SD card) and uploaded to server
-8. **Backend** stores readings, retrains model periodically, sends alerts
+## Data Flow (End-to-End)
 
-## ML Pipeline
+```
+Step 1: SENSING
+        Inlet Sensor (GPIO 34)  ─┐
+        Fixture 1 Sensor (35)   ─┤  Every 1 second:
+        Fixture 2 Sensor (32)   ─┤  → Read pulse count via ISR
+        Fixture 3 Sensor (33)   ─┤  → Debounce (5ms)
+        Fixture 4 Sensor (25)   ─┘  → Calculate flow rate & volume
 
-```mermaid
-flowchart LR
-    A[Raw Pulse Data<br/>×5 sensors] --> B[Feature Extraction]
-    B --> C[Feature Vector<br/>flow_rate, duration, hour,<br/>day_of_week, fixture_id,<br/>inlet-to-fixture ratio]
-    C --> D[Random Forest Model<br/>TFLite Micro]
-    D --> E{Classification}
-    E -->|Normal| F[Log + Continue]
-    E -->|Minor Leak| G[Alert + Valve Shutoff]
-    E -->|Major Leak| H[Alert + Valve Shutoff + Alarm]
-    E -->|Anomaly| I[Flag for Review]
+Step 2: LOCAL PROCESSING
+        For each fixture:
+        → flow_rate = (pulse_count * 60) / (PPL * interval_s)
+        → volume = pulse_count / PPL
+        → total_liters += volume
+        → Inlet balance = inlet_volume - sum(fixtures_volume)
+
+Step 3: FIREBASE UPLOAD (every 5–60 seconds via Firebase-ESP-Client)
+        → Write to /readings/{device_id}/{timestamp}
+        → Stream listener for /commands/{device_id}
+
+Step 4: PYTHONANYWHERE PROCESSING (real-time via Pyrebase4 stream)
+        → Listen to /readings/{device_id}
+        → Extract features for ML
+        → Run XGBoost inference
+        → Run Isolation Forest anomaly score
+        → If leak detected → write to /alerts/ + trigger notification
+
+Step 5: USER ACTION
+        → Dashboard displays real-time readings
+        → Telegram / Email alert sent
+        → User sends valve command → /commands/{device_id}
+        → ESP32 Firebase listener receives command → activates relay
 ```
 
-## Key Features
+---
 
-- **Real-time monitoring** — 5 flow sensors read simultaneously via interrupts
-- **Fixture-level leak detection** — identify exactly which fixture is leaking
-- **Check valves** prevent backflow between fixtures
-- **Solenoid shutoff** — automatic valve closure on leak detection
-- **ML-powered** — Random Forest model tuned for water usage patterns
-- **Local + Cloud** — runs on ESP32 edge; backend for dashboard and retraining
-- **OTA updates** — model and firmware updates over the air
+## Communication Paths
+
+| Path | Method | Protocol | Library |
+|------|--------|----------|---------|
+| ESP32 → Firebase | Write + Stream | HTTPS/SSE | Firebase-ESP-Client |
+| Firebase → ESP32 | Stream Listener | Server-Sent Events | Firebase-ESP-Client |
+| PythonAnywhere → Firebase | Read + Stream + Write | REST/SSE | Pyrebase4 |
+| Firebase → PythonAnywhere | Stream Listener | Server-Sent Events | Pyrebase4 |
+| User → Dashboard | HTTP/WebSocket | HTTPS | Flask + JavaScript |
+| Dashboard → Valve | Write to /commands | HTTPS | Fetch API |
+
+---
+
+## Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| **Firebase over custom server** | Managed real-time DB, built-in auth, no server maintenance |
+| **Firebase-ESP-Client** | Most mature Firebase library for ESP32, supports streaming (SSE) |
+| **Pyrebase4** | Python Firebase client with stream support for PythonAnywhere |
+| **XGBoost on PythonAnywhere** | More powerful than edge ML — no model size limits, faster training, GPU support |
+| **Isolation Forest + XGBoost** | XGBoost for known leak patterns, Isolation Forest for unknown anomalies |
+| **Check Valves per Fixture** | Prevents backflow contamination between fixtures |
+| **SD Card Backup** | Survives WiFi/Firebase outages — data never lost |

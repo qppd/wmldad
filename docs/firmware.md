@@ -1,230 +1,418 @@
-# Firmware Architecture — Water Meter with Leak Detection
+# Firmware Architecture — ESP32 with Firebase-ESP-Client
+
+> **Framework:** Arduino (ESP32 Core) via PlatformIO
+> **Firebase Client:** [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) v4.4+
+> **Communication:** HTTPS + SSE Stream
+> **Sensor Count:** 5 flow sensors (1 inlet + 4 fixtures)
+
+---
 
 ## File Structure
 
 ```
-water-meter/
-├── src/
-│   ├── main.cpp                  # Entry point, setup() and loop()
-│   ├── config.h                  # User configuration (WiFi, pins, intervals)
-│   ├── config.example.h          # Template configuration file
-│   ├── sensor_manager.h          # Manages all 5 flow sensor interrupts
-│   ├── flow_sensor.h             # Single flow sensor pulse counter
-│   ├── feature_extractor.h       # Builds feature vector for ML inference
-│   ├── ml_inference.h            # Random Forest → TFLite Micro inference
-│   ├── leak_detector.h           # Combines ML + rules to confirm leaks
-│   ├── valve_controller.h        # Relay control for solenoid valves
-│   ├── wifi_manager.h            # WiFi connection handler
-│   ├── mqtt_client.h             # MQTT publish / subscribe
-│   ├── http_client.h             # HTTP REST client
-│   ├── data_logger.h             # Local storage (SD card + SPIFFS)
-│   ├── ntp_sync.h                # NTP time synchronization
-│   ├── display_manager.h         # OLED display
-│   ├── alert_manager.h           # Buzzer + LED alerts
-│   ├── ota_updater.h             # Firmware + model OTA updates
-│   └── led_indicator.h           # Status LED feedback
-├── model/
-│   ├── leak_model.tflite         # Random Forest TFLite model
-│   └── model_config.h            # Model parameters (num features, classes)
-├── training/
-│   ├── train_model.py            # scikit-learn training script
-│   ├── feature_engineering.py    # Feature extraction from raw data
-│   ├── export_tflite.py          # sklearn → ONNX → TFLite conversion
-│   └── simulate.py               # Simulate data for testing
-├── platformio.ini                # PlatformIO project config
-└── README.md
+src/
+├── main.cpp                    # Entry point: setup() + loop()
+├── config.h                    # All configurable parameters
+├── config.example.h            # Template (safe for git)
+├── sensor_manager.h            # Manages 5 sensor ISRs
+├── flow_sensor.h               # Single pulse counter class
+├── firebase_client.h           # Firebase-ESP-Client wrapper
+├── local_rules.h               # Local leak detection (non-ML fallback)
+├── valve_controller.h          # Relay control for 5 valves
+├── wifi_manager.h              # WiFi connect + reconnect
+├── data_logger.h               # SD card + SPIFFS logging
+├── display_manager.h           # OLED 128×64
+├── alert_manager.h             # Buzzer + RGB LED alerts
+├── ntp_sync.h                  # NTP time sync
+├── ota_updater.h               # OTA firmware updates
+└── led_indicator.h             # Status LED patterns
+
+data/
+├── firebase_ca_cert.h          # Firebase SSL root CA certificate
+└── device_config.json           # Device settings (read from SPIFFS)
 ```
 
 ---
 
-## Main Loop Flow
-
-```
-loop()
-├── Read all 5 flow sensors (pulse counters)
-├── Extract features per fixture
-├── Run Random Forest inference (TFLite Micro)
-├── Check classification:
-│   ├── Normal → log, update display
-│   ├── Minor Leak → increment counter, if 3+ consecutive → ALERT
-│   ├── Major Leak → immediate ALERT
-│   └── Anomaly → log features for review
-├── If leak confirmed → close valve + alert
-├── Update OLED display (live flow per fixture)
-├── Check upload interval → send data
-├── Check OTA updates
-├── Check command topic (MQTT)
-├── Update status LED
-└── Light sleep until next read cycle
-```
-
----
-
-## ML Inference Module
-
-### Loading the Model
+## Main Loop
 
 ```cpp
-#include <TensorFlowLite.h>
-#include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_interpreter.h"
-#include "model/leak_model.tflite"  // Compiled into firmware
-
-// Model is compiled as a C array (xxd -i)
-extern const unsigned char leak_model_tflite[];
-extern const int leak_model_tflite_len;
-
-// Initialize interpreter
-static tflite::MicroInterpreter* interpreter;
-static constexpr int kTensorArenaSize = 32 * 1024;  // 32 KB
-static uint8_t tensor_arena[kTensorArenaSize];
-```
-
-### Running Inference
-
-```cpp
-float features[9];  // 9 features from extractor
-TfLiteTensor* input = interpreter->input(0);
-TfLiteTensor* output = interpreter->output(0);
-
-// Copy features to input tensor
-for (int i = 0; i < 9; i++) {
-    input->data.f[i] = features[i];
-}
-
-// Run inference
-interpreter->Invoke();
-
-// Read output probabilities
-float normal_prob = output->data.f[0];
-float minor_leak_prob = output->data.f[1];
-float major_leak_prob = output->data.f[2];
-
-// Confidence check
-if (max_prob > 0.80) {
-    return classification;
-} else {
-    return "uncertain";
+void loop() {
+    // 1. Read all 5 sensors (non-blocking)
+    sensorManager.readAll();
+    
+    // 2. Calculate flow metrics per fixture
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        float rate = sensorManager.getFlowRate(i);
+        float volume = sensorManager.getVolume(i);
+        metrics[i] = {rate, volume};
+    }
+    
+    // 3. Update OLED display
+    displayManager.showMetrics(metrics);
+    
+    // 4. Check local leak rules
+    LeakStatus ls = localRules.check(metrics);
+    if (ls != LEAK_NONE) {
+        alertManager.activate(ls);
+        valveController.close(ls.fixture_index);
+    }
+    
+    // 5. Check Firebase stream for commands
+    firebaseClient.processStream();
+    
+    // 6. Upload to Firebase (if interval reached)
+    if (millis() - lastUpload > UPLOAD_INTERVAL_MS) {
+        firebaseClient.uploadReading(metrics);
+        lastUpload = millis();
+    }
+    
+    // 7. Restart WiFi if disconnected
+    wifiManager.ensureConnected();
+    
+    // 8. Small delay to prevent watchdog reset
+    delay(100);
 }
 ```
 
-### Model Training (Python)
-
-```python
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
-
-rf = RandomForestClassifier(
-    n_estimators=50,
-    max_depth=10,
-    min_samples_leaf=5,
-    random_state=42,
-    n_jobs=-1
-)
-rf.fit(X_train, y_train)
-
-# Convert to TFLite via ONNX
-# See training/export_tflite.py
-```
-
 ---
 
-## Sensor Manager (5 Sensors)
+## Firebase-ESP-Client Configuration
+
+### Initialization
 
 ```cpp
-#define NUM_SENSORS 5
+#include <Firebase_ESP_Client.h>
+#include "addons/TokenHelper.h"    // For token generation
+#include "addons/RTDBHelper.h"     // For RTDB helpers
 
-struct SensorConfig {
-    uint8_t gpio;
-    const char* name;
-    const char* fixture;
-};
+FirebaseData fbData;        // Main data object
+FirebaseData fbStream;      // Stream data object
+FirebaseAuth fbAuth;
+FirebaseConfig fbConfig;
 
-SensorConfig sensors[NUM_SENSORS] = {
-    {34, "inlet", "main_inlet"},
-    {35, "fix1", "kitchen_sink"},
-    {32, "fix2", "toilet"},
-    {33, "fix3", "wash_basin"},
-    {25, "fix4", "shower"}
-};
+unsigned long dataMillis = 0;
+bool streamCommand = false;
 
-// ISR per sensor — one handler function
-void IRAM_ATTR pulseCounterISR(void* arg) {
-    int index = (int)arg;
-    if (millis() - lastPulseTime[index] > DEBOUNCE_MS) {
-        pulseCount[index]++;
-        lastPulseTime[index] = millis();
+void setupFirebase() {
+    fbConfig.api_key = FIREBASE_API_KEY;
+    fbConfig.database_url = FIREBASE_DATABASE_URL;
+    
+    // Sign-in method: Email/Password
+    fbAuth.user.email = FIREBASE_USER_EMAIL;
+    fbAuth.user.password = FIREBASE_USER_PASSWORD;
+    
+    // Token callback
+    fbConfig.token_status_callback = tokenStatusCallback;
+    
+    Firebase.begin(&fbConfig, &fbAuth);
+    Firebase.reconnectWiFi(true);
+    
+    // Set buffer size for large payloads
+    fbData.setResponseSize(1024);
+    fbStream.setResponseSize(1024);
+    
+    // Start command stream
+    String streamPath = "/commands/" + String(DEVICE_ID);
+    if (Firebase.RTDB.beginStream(&fbStream, streamPath)) {
+        Serial.println("Firebase stream started on: " + streamPath);
+    }
+}
+```
+
+### Uploading Reading Data
+
+```cpp
+void uploadReading(SensorMetric metrics[5]) {
+    if (!Firebase.ready()) {
+        Serial.println("Firebase not ready, skipping upload");
+        return;
+    }
+    
+    FirebaseJson json;
+    String timestamp = getTimestamp();
+    String path = "/readings/" + String(DEVICE_ID) + "/" + timestamp;
+    
+    // Add inlet sensor data
+    json.set("inlet/flow_rate", metrics[0].flowRate);
+    json.set("inlet/volume", metrics[0].volume);
+    json.set("inlet/total", metrics[0].total);
+    json.set("inlet/pulse_count", metrics[0].pulseCount);
+    
+    // Add fixture sensors (1–4)
+    for (int i = 1; i < 5; i++) {
+        String prefix = "fixture_" + String(i);
+        json.set(prefix + "/flow_rate", metrics[i].flowRate);
+        json.set(prefix + "/volume", metrics[i].volume);
+        json.set(prefix + "/total", metrics[i].total);
+        json.set(prefix + "/pulse_count", metrics[i].pulseCount);
+    }
+    
+    // Add device status
+    json.set("rssi", WiFi.RSSI());
+    json.set("local_rules_status", (int)localRules.getStatus());
+    
+    // Push to Firebase Realtime DB
+    if (Firebase.RTDB.pushJSON(&fbData, path, &json)) {
+        Serial.println("Data uploaded to Firebase");
+    } else {
+        Serial.println("Firebase upload failed: " + fbData.errorReason());
+        // Save to SD card as fallback
+        dataLogger.save(metrics);
+    }
+}
+```
+
+### Streaming Commands (Real-time)
+
+```cpp
+void processStream() {
+    if (!Firebase.ready()) return;
+    
+    // Check for stream data
+    if (Firebase.RTDB.streamAvailable(&fbStream)) {
+        String path = fbStream.dataPath();
+        String value = fbStream.stringData();
+        int type = fbStream.dataTypeEnum();
+        
+        Serial.printf("Stream: path=%s, value=%s\n", path.c_str(), value.c_str());
+        
+        // Parse command from path
+        if (path.startsWith("/" + String(DEVICE_ID))) {
+            // Extract command
+            if (value == "close_all") {
+                valveController.closeAll();
+            } else if (value == "close_inlet") {
+                valveController.close(0);
+            } else if (value == "close_fix1") {
+                valveController.close(1);
+            } else if (value == "close_fix2") {
+                valveController.close(2);
+            } else if (value == "close_fix3") {
+                valveController.close(3);
+            } else if (value == "close_fix4") {
+                valveController.close(4);
+            } else if (value == "open_all") {
+                valveController.openAll();
+            } else if (value.startsWith("open_")) {
+                // open_0, open_1, etc.
+                int idx = value.substring(5).toInt();
+                valveController.open(idx);
+            } else if (value == "calibrate_inlet") {
+                sensorManager.startCalibration(0);
+            }
+        }
     }
 }
 ```
 
 ---
 
-## Leak Confirmation Logic
+## Sensor Manager (5 × Pulse Counter)
 
-| Condition | Classification | Action |
-|-----------|---------------|--------|
-| ML says `normal` AND confidence > 0.8 | ✅ Normal | Log + continue |
-| ML says `minor_leak` × 1 | ⏳ Watch | Increment counter |
-| ML says `minor_leak` × 3 consecutive | ⚠️ Minor Leak | Close valve + alert owner |
-| ML says `major_leak` | 🚨 Major Leak | Close valve + alarm + emergency alert |
-| ML says `anomaly` | ❓ Unknown | Log features + notify for review |
-| Inlet >> Sum(fixtures) by >10% | ⚠️ Hidden Leak | Alert (unknown fixture) |
+```cpp
+#define NUM_SENSORS 5
+#define DEBOUNCE_MS 5
+
+struct SensorConfig {
+    uint8_t gpio;
+    const char* name;
+    const char* fixture_name;
+};
+
+// Pin configuration
+SensorConfig sensors[NUM_SENSORS] = {
+    {34, "inlet", "Main Inlet"},
+    {35, "fix1", "Kitchen Sink"},
+    {32, "fix2", "Toilet"},
+    {33, "fix3", "Wash Basin"},
+    {25, "fix4", "Shower"}
+};
+
+// ISR-safe variables (volatile + IRAM)
+static volatile unsigned long pulseCount[NUM_SENSORS] = {0};
+static volatile unsigned long lastPulseTime[NUM_SENSORS] = {0};
+
+// One ISR function for all sensors (parameterized)
+void IRAM_ATTR pulseCounterISR(void* arg) {
+    int index = (int)(size_t)arg;
+    unsigned long now = millis();
+    if (now - lastPulseTime[index] > DEBOUNCE_MS) {
+        pulseCount[index]++;
+        lastPulseTime[index] = now;
+    }
+}
+
+void SensorManager::begin() {
+    for (int i = 0; i < NUM_SENSORS; i++) {
+        pinMode(sensors[i].gpio, INPUT_PULLUP);
+        // Attach ISR — works because different GPIOs have different interrupt entries
+        attachInterruptArg(
+            digitalPinToInterrupt(sensors[i].gpio),
+            pulseCounterISR,
+            (void*)(size_t)i,
+            RISING
+        );
+    }
+}
+```
 
 ---
 
-## Configuration
+## Firebase Data Structure
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `WIFI_SSID` | — | WiFi network name |
-| `NUM_SENSORS` | 5 | Number of flow sensors |
-| `SENSOR_PINS[]` | {34, 35, 32, 33, 25} | GPIO pins per sensor |
-| `RELAY_PINS[]` | {26, 27, 14, 12, 13} | GPIO pins per valve relay |
-| `PULSE_PER_LITER` | 450 | Calibration factor per sensor |
-| `READ_INTERVAL_MS` | 1000 | Read sensors every 1s |
-| `UPLOAD_INTERVAL_MS` | 60000 | Upload every 60s |
-| `LEAK_CONFIRM_COUNT` | 3 | Consecutive minor leak readings to confirm |
-| `CONFIDENCE_THRESHOLD` | 0.80 | Minimum ML confidence |
-| `MODEL_PATH` | /model/leak_model.tflite | Model location |
+```
+/readings/{device_id}/
+  /{ISO_timestamp}/
+    /inlet/
+      flow_rate: 12.5
+      volume: 2.5
+      total: 10000.0
+      pulse_count: 1125
+    /fixture_1/
+      flow_rate: 5.2
+      volume: 0.9
+      total: 3500.0
+      pulse_count: 405
+    /fixture_2/   (same structure)
+    /fixture_3/   (same structure)
+    /fixture_4/   (same structure)
+    /rssi: -65
+    /local_rules_status: 0
+
+/commands/{device_id}/
+  /{command_id}/
+    command: "close_fix1"
+    timestamp: "2026-07-10T12:00:00Z"
+    source: "dashboard"
+    executed: false
+
+/alerts/{device_id}/
+  /{alert_id}/
+    fixture_id: 1
+    fixture_name: "Kitchen Sink"
+    alert_type: "minor_leak"
+    confidence: 0.87
+    flow_rate: 0.3
+    duration: 300
+    valve_action: "closed"
+    timestamp: "2026-07-10T12:05:00Z"
+    resolved: false
+```
+
+> Full Firebase schema: [Firebase Realtime DB Schema](./firebase-realtime-db.md)
 
 ---
 
-## Power Modes
+## Local Leak Rules (ESP32 Fallback)
 
-| Mode | Consumption | Use Case |
-|------|-------------|----------|
-| Active (reading) | ~80 mA | 1s every 60s |
-| Light Sleep | ~10 mA | Between read cycles |
-| Deep Sleep | ~10 µA | Not recommended (need fast leak response) |
+These run on the ESP32 when Firebase/ML is unreachable — they're less accurate but work offline:
+
+| Rule | Condition | Action |
+|------|-----------|--------|
+| **Inlet imbalance** | `inlet_volume > sum(fixtures) * 1.10` | Alert: hidden leak detected |
+| **Continuous flow** | Flow > 0 for > 30 minutes | Alert: possible stuck valve or running toilet |
+| **Drip detection** | Flow 0.1–0.5 L/min for > 5 min | Alert: drip leak suspected |
+| **No flow** | All sensors read 0 for > 60 min | Info: no water usage (normal) |
+| **Sensor fault** | A fixture reads 0 while inlet reads > 5 L/min | Alert: possible sensor fault |
 
 ---
 
-## Build Instructions
+## Configuration (`config.h`)
+
+```cpp
+// === WiFi ===
+#define WIFI_SSID        "YourWiFiName"
+#define WIFI_PASSWORD    "YourWiFiPassword"
+
+// === Firebase ===
+#define FIREBASE_API_KEY       "AIzaSy..."
+#define FIREBASE_DATABASE_URL  "https://your-project.firebaseio.com"
+#define FIREBASE_USER_EMAIL    "esp32@your-project.iam.gserviceaccount.com"
+#define FIREBASE_USER_PASSWORD "your-password"
+#define DEVICE_ID              "wm_001"
+
+// === Sensors ===
+#define NUM_SENSORS      5
+#define PULSE_PER_LITER  450.0   // Calibration value (adjust per sensor)
+#define DEBOUNCE_MS      5       // Debounce in milliseconds
+
+// === Timing (milliseconds) ===
+#define READ_INTERVAL_MS     1000    // Read sensors every 1 second
+#define UPLOAD_INTERVAL_MS   5000    // Upload to Firebase every 5 seconds
+
+// === Valve Control ===
+#define RELAY_PINS   {26, 27, 14, 12, 13}
+#define VALVE_CLOSE_STATE  LOW    // Relay active LOW = valve closed
+
+// === Local Rules ===
+#define LEAK_CONFIRM_COUNT  3      // Consecutive readings to confirm minor leak
+#define CONTINUOUS_FLOW_MIN  30    // Minutes before alerting
+```
+
+---
+
+## Build and Upload
 
 ### PlatformIO
 
-```bash
-# Install dependencies
-pio pkg install
+```ini
+; platformio.ini
+[env:esp32dev]
+platform = espressif32
+board = node32s
+framework = arduino
+monitor_speed = 115200
 
-# Build with model
+lib_deps =
+    mobizt/Firebase-ESP-Client@^4.4.8
+    bblanchon/ArduinoJson@^7.0.0
+    adafruit/Adafruit SSD1306@^2.5.0
+    adafruit/Adafruit GFX Library@^1.11.0
+```
+
+```bash
+# Build
 pio run
 
-# Upload firmware + model
+# Upload
 pio run --target upload
-pio run --target uploadfs   # Upload model to SPIFFS
 
 # Monitor
 pio device monitor --baud 115200
+
+# Upload filesystem (for SPIFFS data)
+pio run --target uploadfs
 ```
 
-### Train & Export Model
+---
 
-```bash
-cd training
-pip install -r requirements.txt
-python train_model.py            # Train Random Forest
-python export_tflite.py          # Export to TFLite
-cp leak_model.tflite ../data/    # Copy to data folder
+## Firebase Security Rules
+
+```json
+{
+  "rules": {
+    "readings": {
+      ".indexOn": ["device_id"],
+      "$device_id": {
+        "$timestamp": {
+          ".read": "auth.uid === $device_id",
+          ".write": "auth.uid === $device_id"
+        }
+      }
+    },
+    "commands": {
+      "$device_id": {
+        ".read": "auth.uid === $device_id",
+        ".write": "auth.uid === 'pythonanywhere' || auth.uid === 'dashboard'"
+      }
+    },
+    "alerts": {
+      "$device_id": {
+        ".read": "auth.uid === $device_id || auth.uid === 'pythonanywhere'",
+        ".write": "auth.uid === 'pythonanywhere'"
+      }
+    }
+  }
+}
 ```

@@ -1,136 +1,236 @@
-# Flowchart — Water Meter with Leak Detection
+# Flowchart — Water Meter with Leak Detection (ESP32 → Firebase → PythonAnywhere)
 
-## 1. Main System Flow
+## 1. Main System Flow (High-Level)
 
 ```mermaid
 flowchart TD
-    A[Power On] --> B[Initialize ESP32]
-    B --> C[Initialize All 5 Flow Sensors]
-    C --> D[Load Random Forest Model<br/>from Flash/SD]
-    D --> E[Connect to WiFi]
-    E --> F{Connected?}
-    F -->|Yes| G[Sync NTP Time]
-    F -->|No| H[Offline Mode]
+    A[Power On] --> B[ESP32 Initialization]
+    B --> C[Initialize All 5 Flow Sensors<br/>+ Attach ISRs]
+    C --> D[Connect to WiFi]
+    D --> E{Connected?}
+    E -->|Yes| F[Initialize Firebase-ESP-Client]
+    E -->|No| G[Offline Mode<br/>→ SD Card Logging]
+    F --> H[Start Firebase Stream Listener<br/>(commands)]
     G --> I[Enter Main Loop]
     H --> I
     
-    I --> J[Read All Pulse Counters<br/>Sensor 1–5]
-    J --> K{Any Activity?}
-    K -->|No| L[Idle / Sleep]
-    L --> J
+    I --> J[Read All Pulse Counters<br/>Sensors 1–5]
+    J --> K[Calculate Flow Metrics<br/>per Fixture]
+    K --> L[Update OLED Display]
+    L --> M[Apply Local Leak Rules<br/>(non-ML fallback)]
     
-    K -->|Yes| M[Extract Features<br/>per Fixture]
-    M --> N[Run Random Forest<br/>Inference]
-    N --> O{Classification}
+    M --> N{Upload Interval?<br/>(5–60s)}
+    N -->|Yes| O[Push to Firebase<br/>→ /readings/{device_id}/{ts}]
+    N -->|No| P{Command Received?}
     
-    O -->|Normal| P[Log Usage]
-    O -->|Minor Leak| Q[Sound Alert<br/>Close Valve]
-    O -->|Major Leak| R[Sound Alarm<br/>Close Valve<br/>Send Emergency Alert]
-    O -->|Anomaly| S[Flag for Review]
+    O --> Q{Success?}
+    Q -->|Yes| R[Clear Local Buffer]
+    Q -->|No| S[Save to SD Card Queue]
     
-    P --> T[Update Display]
-    Q --> T
-    R --> T
-    S --> T
+    R --> P
+    S --> P
     
-    T --> U{Upload Interval?}
-    U -->|Yes| V[Send to Server]
-    U -->|No| W[Continue]
+    P -->|Yes| T[Execute Command<br/>→ Valve Open/Close]
+    P -->|No| I
     
-    V --> X{Server OK?}
-    X -->|Yes| Y[Clear Local Buffer]
-    X -->|No| Z[Queue for Retry]
-    
-    Y --> J
-    Z --> J
-    W --> J
+    T --> I
 ```
 
-## 2. Pulse Interrupt Flow
+## 2. Firebase Data Flow (ESP32 → Firebase → PythonAnywhere)
 
 ```mermaid
 flowchart LR
+    subgraph "ESP32 (Firebase-ESP-Client)"
+        A[Read Sensors] --> B[Build JSON<br/>Payload]
+        B --> C[Firebase.pushJSON<br/>→ /readings/{id}/{ts}]
+        D[Firebase.stream<br/>← /commands/{id}]
+        D --> E{New Command?}
+        E -->|close valve| F[Set Relay LOW]
+        E -->|open valve| G[Set Relay HIGH]
+        E -->|calibrate| H[Enter Calibration Mode]
+    end
+    
+    subgraph "Firebase Realtime DB"
+        C --> I[(/readings)]
+        J[(/commands)] --> D
+        K[(/alerts)] --> L
+        M[(/models)] --> N
+    end
+    
+    subgraph "PythonAnywhere (Pyrebase4)"
+        O[Pyrebase4 Stream<br/>Listener] --> I
+        O --> P[Extract Features]
+        P --> Q[XGBoost Inference]
+        P --> R[Isolation Forest<br/>Anomaly Score]
+        Q --> S{Leak?}
+        R --> S
+        S -->|Yes| T[Write Alert<br/>→ /alerts/{id}]
+        T --> K
+        S -->|No| U[Log Normal Reading]
+        T --> V[Send Notification<br/>Telegram / Email]
+    end
+    
+    subgraph "User"
+        W[Web Dashboard] --> M
+        W --> I
+        X[Telegram Alert] --> V
+        Y[User Command] --> J
+    end
+```
+
+## 3. Pulse Interrupt Flow (ESP32 ISR)
+
+```mermaid
+flowchart TD
     A[Pulse from<br/>Flow Sensor N] --> B[ISR Triggered]
-    B --> C[Increment<br/>Pulse Counter N]
-    C --> D[Debounce Guard<br/>> 5ms]
-    D --> E[Timestamp Pulse<br/>for Duration Calc]
-    E --> F[Return to Main Loop]
+    B --> C[Read millis()]
+    C --> D{ millis() - lastPulseTime[N]<br/>> 5ms ?}
+    D -->|Yes (valid pulse)| E[Increment pulseCount[N]]
+    D -->|No (bounce)| F[Ignore]
+    E --> G[Update lastPulseTime[N]]
+    G --> H[Return to Main Loop]
+    F --> H
 ```
 
-## 3. Leak Detection Flow (ML Inference)
+## 4. Feature Extraction Flow (PythonAnywhere)
 
 ```mermaid
 flowchart TD
-    A[Features Collected] --> B[Normalize Features]
-    B --> C[Feed to Random Forest<br/>TensorFlow Lite Model]
-    C --> D[Get Probabilities<br/>Normal / Minor Leak / Major Leak / Anomaly]
-    D --> E{Confidence > 80%?}
+    A[Raw Firebase Data] --> B[Parse JSON]
+    B --> C[For each fixture:<br/>extract raw metrics]
+    C --> D[Compute Features]
     
-    E -->|No| F[Wait for More Data<br/>Buffer Next N Readings]
-    F --> C
+    D --> D1["flow_rate (L/min)"]
+    D --> D2["duration_seconds"]
+    D --> D3["hour_of_day"]
+    D --> D4["day_of_week"]
+    D --> D5["fixture_id (encoded)"]
+    D --> D6["inlet_to_fixture_ratio"]
+    D --> D7["rate_variance (10s window)"]
+    D --> D8["is_night_time"]
+    D --> D9["rolling_avg_1min"]
+    D --> D10["pulse_trend (slope)"]
     
-    E -->|Yes| G{Prediction?}
+    D1 --> E[Feature Vector<br/>(9–12 features)]
+    D2 --> E
+    D3 --> E
+    D4 --> E
+    D5 --> E
+    D6 --> E
+    D7 --> E
+    D8 --> E
+    D9 --> E
+    D10 --> E
     
-    G -->|Normal| H[Reset Leak Counters<br/>Green LED]
-    G -->|Minor Leak| I[Increment Minor Count]
-    I --> J{Count > 3}<br/>consecutive?
-    J -->|Yes| K[CONFIRMED MINOR LEAK]
-    J -->|No| H
-    
-    G -->|Major Leak| L[CONFIRMED MAJOR LEAK]
-    G -->|Anomaly| M[Log Anomaly Features]
+    E --> F[Scale / Normalize]
+    F --> G[← XGBoost + Isolation Forest]
 ```
 
-## 4. Valve Control Flow
+## 5. XGBoost ML Inference Flow
 
 ```mermaid
 flowchart TD
-    A[Leak Confirmed<br/>Fixture N] --> B[Sound Buzzer]
-    B --> C[Set RGB Red<br/>Flash Pattern]
-    C --> D{Fixture N<br/>Valve Exists?}
+    A[Feature Vector<br/>(9 features)] --> B[XGBoost Predict]
+    B --> C[Class Probabilities]
+    C --> D{argmax class}
     
-    D -->|Yes| E[Activate Relay N<br/>→ Close Solenoid Valve]
-    D -->|No| F[Alert Only Mode]
+    D -->|normal<br/>confidence > 0.80| E[✅ Normal Usage]
+    D -->|minor_leak<br/>confidence > 0.70| F[⚠️ Minor Leak]
+    D -->|major_leak<br/>confidence > 0.85| G[🚨 Major Leak]
+    D -->|low confidence<br/>< 0.70| H[❓ Uncertain]
     
-    E --> G[Send Notification<br/>Telegram / SMS]
-    F --> G
+    H --> I[Isolation Forest<br/>Anomaly Score]
+    I --> J{Anomaly?}
+    J -->|score > threshold| K[⚠️ Anomaly Detected]
+    J -->|normal| L[Wait for more data]
     
-    G --> H{User Action?}
-    H -->|Manual Reset| I[User Opens Valve]
-    H -->|Auto Reset| J[Wait 5 min<br/>Re-evaluate]
-    J --> K{Leak Stopped?}
-    K -->|Yes| L[Reopen Valve]
-    K -->|No| M[Keep Closed<br/>Escalate Alert]
+    F --> M{Consecutive count}
+    M -->|≥ 3| N[CONFIRMED MINOR LEAK]
+    M -->|< 3| O[Increment counter → watch]
     
-    I --> N[Resume Normal Ops]
-    L --> N
+    G --> P[CONFIRMED MAJOR LEAK]
+    K --> Q[Write to /alerts]
+    N --> Q
+    P --> Q
+    
+    Q --> R[Send Telegram Alert]
+    Q --> S[Write Valve Command<br/>→ /commands/{id}]
 ```
 
-## 5. Data Upload Flow
+## 6. Valve Control Flow (ESP32)
 
 ```mermaid
 flowchart TD
-    A[Build JSON Payload<br/>5 sensor readings + ML result] --> B[Open HTTP/MQTT Connection]
-    B --> C{Send Successful?}
-    C -->|200 OK| D[Mark as Synced]
-    C -->|Error| E{Retries < 5?}
-    E -->|Yes| F[Exponential Backoff]
-    F --> C
-    E -->|No| G[Save to SD Card + Flash]
-    D --> H[Clear In-Memory Buffer]
-    G --> I[Next Interval]
-    H --> I
+    A[Firebase Stream Event<br/>← /commands/{device_id}] --> B{Command Type?}
+    
+    B -->|close_inlet| C[Set Relay 1 LOW<br/>→ Close Inlet Valve]
+    B -->|close_fix1| D[Set Relay 2 LOW<br/>→ Close Fixture 1]
+    B -->|close_fix2| E[Set Relay 3 LOW<br/>→ Close Fixture 2]
+    B -->|close_fix3| F[Set Relay 4 LOW<br/>→ Close Fixture 3]
+    B -->|close_fix4| G[Set Relay 5 LOW<br/>→ Close Fixture 4]
+    B -->|open_*| H[Set Corresponding<br/>Relay HIGH]
+    B -->|close_all| I[Close All Valves]
+    B -->|calibrate| J[Start Calibration<br/>Routine]
+    
+    C --> K[Update OLED<br/>+ LED Status]
+    D --> K
+    E --> K
+    F --> K
+    G --> K
+    H --> K
+    I --> K
+    J --> K
+    
+    K --> L[Acknowledge to Firebase<br/>→ valve_state_updated]
 ```
 
-## 6. ML Model Update Flow
+## 7. Local Leak Rules (ESP32 Fallback — No ML)
+
+```mermaid
+flowchart TD
+    A[Every Read Cycle] --> B[Check inlet vs sum of fixtures]
+    B --> C{Inlet volume ><br/>sum(fixtures) + 10%?}
+    C -->|Yes| D[Hidden Leak Suspected<br/>→ Alert Locally]
+    C -->|No| E[Balance OK]
+    
+    A --> F[Check individual fixture<br/>continuous flow > 30 min]
+    F --> G{Pulse count > 0<br/>for > 30 min?}
+    G -->|Yes| H[Possible Stuck Valve /<br/>Running Toilet]
+    G -->|No| I[Fixture OK]
+    
+    D --> J[Send Firebase Alert]
+    H --> J
+    
+    A --> K[Check for very low<br/>continuous flow]
+    K --> L{Flow 0.1–0.5 L/min<br/>for > 5 min?}
+    L -->|Yes| M[Drip Leak Suspected]
+    M --> J
+    L -->|No| N[No Leak]
+```
+
+## 8. Data Flow Diagram (Full System)
 
 ```mermaid
 flowchart LR
-    A[Server Receives<br/>New Labeled Data] --> B[Retrain Random Forest]
-    B --> C[Export to TFLite]
-    C --> D[OTA Push to ESP32]
-    D --> E[Validate New Model<br/>Dry Run First]
-    E --> F{Accuracy Improved?}
-    F -->|Yes| G[Swap Model]
-    F -->|No| H[Keep Old Model]
+    A[🌊 Water Flow]:::physical --> B[🔌 YF-S201<br/>Flow Sensor]:::physical
+    B --> C[⚡ Pulse<br/>Interrupt]:::firmware
+    C --> D[📊 Feature<br/>Extraction]:::firmware
+    D --> E[🔥 Firebase<br/>ESP-Client]:::firmware
+    E --> F[☁️ Firebase<br/>Realtime DB]:::cloud
+    F --> G[🐍 Pyrebase4<br/>Listener]:::backend
+    G --> H[🧠 XGBoost<br/>Inference]:::ml
+    G --> I[🔍 Isolation<br/>Forest]:::ml
+    H --> J[⚠️ Alert<br/>Engine]:::backend
+    I --> J
+    J --> K[📱 Telegram<br/>Notification]:::user
+    F --> L[🌐 Web<br/>Dashboard]:::user
+    F --> M[📡 ESP32<br/>Command Stream]:::firmware
+    M --> N[🔧 Valve<br/>Controller]:::firmware
+    
+    classDef physical fill:#e1f5fe,stroke:#0288d1
+    classDef firmware fill:#fff3e0,stroke:#f57c00
+    classDef cloud fill:#e8f5e9,stroke:#388e3c
+    classDef backend fill:#f3e5f5,stroke:#7b1fa2
+    classDef ml fill:#fce4ec,stroke:#c62828
+    classDef user fill:#fffde7,stroke:#f9a825
 ```
