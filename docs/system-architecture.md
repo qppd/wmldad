@@ -10,9 +10,7 @@ The system uses 1 inlet flow sensor to measure total consumption and 4 fixture f
 
 ## Architecture Diagram
 
-<p align="center">
-  <img src="diagrams/system-architecture-1-flowchart.svg" alt="Architecture Diagram" width="90%">
-</p>
+> Mermaid-based diagram (SVG export removed; source below)
 
 <details>
 <summary><b> Mermaid Source</b> (click to expand)</summary>

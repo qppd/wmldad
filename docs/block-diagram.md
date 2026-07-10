@@ -2,9 +2,7 @@
 
 ## System Block Diagram
 
-<p align="center">
-  <img src="diagrams/block-diagram-1-block-beta.svg" alt="System Block Diagram" width="90%">
-</p>
+> Mermaid-based diagram (SVG export removed; source below)
 
 <details>
 <summary><b> Mermaid Source</b> (click to expand)</summary>
@@ -180,9 +178,7 @@ YF-S201 Flow Sensor
 
 ## Power Distribution
 
-<p align="center">
-  <img src="diagrams/block-diagram-2-block-beta.svg" alt="Power Distribution" width="90%">
-</p>
+> Mermaid-based diagram (SVG export removed; source below)
 
 <details>
 <summary><b> Mermaid Source</b> (click to expand)</summary>
@@ -222,9 +218,7 @@ block-beta
 
 ## Component Layout (Enclosure)
 
-<p align="center">
-  <img src="diagrams/block-diagram-3-block-beta.svg" alt="Component Layout" width="90%">
-</p>
+> Mermaid-based diagram (SVG export removed; source below)
 
 <details>
 <summary><b> Mermaid Source</b> (click to expand)</summary>
