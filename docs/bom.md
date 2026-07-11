@@ -1,6 +1,6 @@
 # Bill of Materials (BOM) — Water Meter with Leak Detection
 
-> **System:** 1 inlet flow sensor + 4 fixture flow sensors → ESP32 → Firebase → PythonAnywhere → XGBoost ML
+> **System:** 1 inlet flow sensor + 4 fixture flow sensors → ESP32 → Firebase → RPi → XGBoost ML
 > **Supplier Priority:** [Makerlab Electronics](https://shopee.ph/makerlabelectronics)  → 4–5  alternatives
 > **Prices:** Estimated in Philippine Peso (₱), July 2026
 
@@ -70,12 +70,12 @@
 
 | # | Item | Qty | Unit (₱) | Total (₱) | Link |
 |---|------|-----|----------|-----------|------|
-| 25 | **4-Channel Relay Module** 5V (optocoupler, active LOW) | 1 | ₱250 | ₱250 | [Makerlab Shopee](https://shopee.ph/search?keyword=4%20channel%20relay%20makerlab) |
-| 26 | **Solenoid Valve** 1/2" NC 12V (or Motorized Ball Valve) | 4 | ₱350 | ₱1,400 | [Shopee 4-5](https://shopee.ph/search?keyword=solenoid%20valve%201/2%2012v) |
+| 25 | **5-Channel Relay Module** 5V (optocoupler, active LOW, for 5 valves) | 1 | ₱350 | ₱350 | [Makerlab Shopee](https://shopee.ph/search?keyword=5%20channel%20relay%20makerlab) |
+| 26 | **Solenoid Valve** 1/2" NC 12V (or Motorized Ball Valve) | 5 | ₱350 | ₱1,750 | [Shopee 4-5](https://shopee.ph/search?keyword=solenoid%20valve%201/2%2012v) |
 | 27 | **1N4007 Diode** (flyback protection for relays) | 10 | ₱3 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=1n4007%20makerlab) |
-| 28 | **TIP120 Darlington Transistor** (solenoid driver) | 4 | ₱25 | ₱100 | [Makerlab Shopee](https://shopee.ph/search?keyword=tip120%20makerlab) |
+| 28 | **TIP120 Darlington Transistor** (solenoid driver) | 5 | ₱25 | ₱125 | [Makerlab Shopee](https://shopee.ph/search?keyword=tip120%20makerlab) |
 
-**Valve Control Subtotal:** **₱1,780**
+**Valve Control Subtotal:** **₱2,225**
 
 ---
 
@@ -105,16 +105,14 @@
 
 ---
 
-## 8. ML Backend (PythonAnywhere — optional if self-hosted)
+## 8. Raspberry Pi Backend
 
 | # | Item | Qty | Unit (₱) | Total (₱) | Note |
 |---|------|-----|----------|-----------|------|
-| 37 | **PythonAnywhere Hacker Plan** (monthly) | 1 mo | ₱285 ($5) | ₱285 | Always-on background task, 1GB RAM |
+| 37 | **Raspberry Pi 4/5** (or 3B+, if on hand) | 1 | ₱2,500 | ₱2,500 | One-time cost, runs Flask + ML locally |
 | 38 | **Telegram Bot** (free) | 1 | ₱0 | ₱0 | Alerts via @BotFather |
 
-**Backend Subtotal:** **₱285/month**
-
-> **Alternative:** Run everything on a Raspberry Pi 4/5 (one-time ~₱3,000) but requires port forwarding.
+**Backend Subtotal:** **₱2,500**
 
 ---
 
@@ -123,8 +121,8 @@
 | Tier | Category | ₱ | Notes |
 |------|----------|---|-------|
 |  **MVP** | Core + breadboard + power | **~₱2,410** | ESP32 + 1 sensor + OLED (prove concept) |
-|  **Standard** | All components + enclosure | **~₱6,470** | Full 5-sensor system with valves |
-|  **Complete** | Full system + PythonAnywhere (1 mo) | **~₱6,755** | Production-ready with ML backend |
+|  **Standard** | All components + enclosure | **~₱6,915** | Full 5-sensor system with valves |
+|  **Complete** | Full system + Raspberry Pi (one-time) | **~₱9,415** | Production-ready with ML backend |
 
 ---
 
@@ -154,5 +152,5 @@
 4. **Use an old phone charger** instead of buying a new 5V adapter
 5. **Use a shoebox** instead of ABS enclosure for prototype
 6. **Buy fittings locally** at Ace Hardware / True Value / local hardware store (cheaper than online + shipping)
-7. **Free PythonAnywhere** works for proof-of-concept — upgrade only when needed
+7. **A laptop without RPi** works for proof-of-concept (just run flask) — upgrade only when needed
 8. **Sigma / Shopee sale days** (8.8, 9.9, 11.11) — can save 20–50% on electronics

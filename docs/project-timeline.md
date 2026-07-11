@@ -34,7 +34,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Complete system architecture and component selection |
-|  **Tasks** | • Draw system architecture diagram<br/>• Select all hardware (ESP32, sensors, valves)<br/>• Select software stack (Firebase, PythonAnywhere, XGBoost)<br/>• Create block diagram<br/>• Assign GPIO pins on ESP32<br/>• Draft plumbing layout |
+|  **Tasks** | • Draw system architecture diagram<br/>• Select all hardware (ESP32, sensors, valves)<br/>• Select software stack (Firebase, RPi, XGBoost)<br/>• Create block diagram<br/>• Assign GPIO pins on ESP32<br/>• Draft plumbing layout |
 |  **Deliverable** | System Architecture Document, Block Diagram, BOM |
 |  **Risk** | Start ordering parts NOW — shipping from Shopee/Lazada can take 1–2 weeks |
 
@@ -43,7 +43,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Order and receive all components |
-|  **Tasks** | • Order from Makerlab Electronics (Shopee/Lazada)<br/>• Buy PVC fittings from local hardware store<br/>• Download all software (Arduino IDE, Python)<br/>• Create Firebase project<br/>• Sign up for PythonAnywhere |
+|  **Tasks** | • Order from Makerlab Electronics (Shopee/Lazada)<br/>• Buy PVC fittings from local hardware store<br/>• Download all software (Arduino IDE, Python)<br/>• Create Firebase project<br/>• Set up a Raspberry Pi |
 |  **Deliverable** | All hardware received, software tools installed, Firebase project created |
 |  **Risk** | Use 4–5 sellers only. Check reviews before ordering. Have backup sellers. |
 
@@ -91,21 +91,21 @@ Each week includes:
 
 ## Phase 3: Backend & ML (Weeks 8–10)
 
-### Week 8: PythonAnywhere Backend
+### Week 8: RPi Backend
 
 | Item | Activity |
 |------|----------|
-|  **Goal** | Flask web app running on PythonAnywhere with Firebase connection |
-|  **Tasks** | • Deploy Flask app skeleton<br/>• Configure Pyrebase4 with service account<br/>• Implement Firebase listener (stream or poll)<br/>• Create dashboard template (HTML + Chart.js)<br/>• Serve dashboard at pythonanywhere.com | 
-|  **Deliverable** | Flask app live at `yourname.pythonanywhere.com` showing sensor data |
-|  **Risk** | Free PythonAnywhere can't run background threads. Use Hacker plan or scheduled tasks. |
+|  **Goal** | Flask web app running on Raspberry Pi with Firebase connection |
+|  **Tasks** | • Set up Raspberry Pi (OS, dependencies)<br/>• Configure Firebase Admin SDK<br/>• Implement Firebase polling (or run listener as a service)<br/>• Create dashboard template (HTML + Chart.js)<br/>• Serve dashboard on RPi: `http://<rpi-ip>:5000/` |
+|  **Deliverable** | Flask app live on RPi showing sensor data from Firebase |
+|  **Risk** | RPi must run 24/7 — use a reliable SD card and consider a UPS |
 
 ### Week 9: ML Model Training
 
 | Item | Activity |
 |------|----------|
 |  **Goal** | Train XGBoost + Isolation Forest on simulated data |
-|  **Tasks** | • Generate synthetic training data (100K samples) in the notebook<br/>• Implement feature extraction in `water_meter_ml_training.ipynb`<br/>• Train XGBoost classifier (Google Colab or Jupyter)<br/>• Train Isolation Forest for anomaly detection<br/>• Export models (JSON + PKL)<br/>• Evaluate: accuracy, precision, recall, F1<br/>• Download trained models from Colab or local, upload to PythonAnywhere |
+|  **Tasks** | • Generate synthetic training data (100K samples) in the notebook<br/>• Implement feature extraction in `water_meter_ml_training.ipynb`<br/>• Train XGBoost classifier (Google Colab or Jupyter)<br/>• Train Isolation Forest for anomaly detection<br/>• Export models (JSON + PKL)<br/>• Evaluate: accuracy, precision, recall, F1<br/>• Download trained models from Colab or local, copy to the RPi |
 |  **Deliverable** | XGBoost model with ≥ 95% accuracy on validation set. Isolation Forest trained on normal data. |
 |  **Risk** | Synthetic data ≠ real data. Model will need retraining after collecting real usage data. |
 
@@ -113,7 +113,7 @@ Each week includes:
 
 | Item | Activity |
 |------|----------|
-|  **Goal** | Complete data pipeline working: Sensor → ESP32 → Firebase → PythonAnywhere → ML → Alert |
+|  **Goal** | Complete data pipeline working: Sensor → ESP32 → Firebase → RPi → ML → Alert |
 |  **Tasks** | • Wire ML inference into Flask app<br/>• Test: simulate leak, verify ML detects it<br/>• Test: alert appears in web dashboard<br/>• Test: Telegram/email notification sent<br/>• Verify valve command flow (dashboard → Firebase → ESP32 → relay) |
 |  **Deliverable** | Full system working end-to-end with all 5 sensors |
 |  **Risk** | Combine all components one at a time. Test each integration step before adding the next. |
@@ -189,7 +189,7 @@ Each week includes:
 | 3 | 🟢 Parts received, tools installed | 🟢 |
 | 5 | 🟢 ESP32 reading all 5 sensors | 🟢 |
 | 7 | 🟢 Local leak detection + valve control | 🟢 |
-| 8 | 🟢 Flask app live on PythonAnywhere | 🟢 |
+| 8 | 🟢 Flask app live on RPi | 🟢 |
 | 10 | 🟢 End-to-end: Sensor → Firebase → ML → Alert | 🟢🟢 |
 | 11 | 🟢 All sensors calibrated (< 3% error) | 🟢 |
 | 13 | 🟢 System refined with real data | 🟢 |
@@ -204,7 +204,7 @@ Each week includes:
 |------|---------------|-------------|
 | **Hardware Lead** | Sensors, wiring, plumbing, enclosure | Student 1 |
 | **Firmware Lead** | ESP32 code, Firebase-ESP-Client, local rules | Student 2 |
-| **Backend Lead** | PythonAnywhere, Flask, Pyrebase4, dashboard | Student 3 |
+| **Backend Lead** | RPi, Flask, Firebase Admin SDK, dashboard | Student 3 |
 | **ML Lead** | XGBoost training, feature engineering, model evaluation | Student 4 |
 
 > 3-person team: combine Backend + ML roles. 2-person team: combine Firmware + Hardware, Backend + ML.
@@ -216,7 +216,7 @@ Each week includes:
 | Pitfall | How to Avoid |
 |---------|-------------|
 | **Ordering parts too late** | Order by Week 2. Use Shopee/Lazada (2–7 day delivery). Have backups. |
-| **Not testing incrementally** | Test each component separately before integrating. Sensor → ESP32 → Firebase → PythonAnywhere → ML. |
+| **Not testing incrementally** | Test each component separately before integrating. Sensor → ESP32 → Firebase → RPi → ML. |
 | **Skipping calibration** | Uncalibrated sensors give ±10% error → ML detects leaks that aren't there or misses real ones. |
 | **Overcomplicated ML** | Start with simple rules + XGBoost. Don't try deep learning on ESP32. |
 | **No offline fallback** | ESP32 must work without internet. SD card logging + local leak rules. |
@@ -231,14 +231,14 @@ Each week includes:
 | ESP32 + Expansion Board | ₱630 |
 | 5× YF-S201 Flow Sensors | ₱900 |
 | Check Valves + PVC Fittings | ₱730 |
-| Relay + Solenoid Valves | ₱1,780 |
+| Relay + Solenoid Valves | ₱2,225 |
 | OLED + Buzzer + LEDs | ₱375 |
 | Breadboard + Jumpers + Resistors | ₱375 |
 | Enclosure + Hardware | ₱520 |
 | Power Supplies | ₱600 |
-| **Total Hardware** | **~₱5,910** |
-| PythonAnywhere (1 month Hacker) | ₱285 |
-| **Grand Total** | **~₱6,195** |
+| **Total Hardware** | **~₱7,410** |
+| Raspberry Pi (4/5) | ₱2,500 |
+| **Grand Total** | **~₱9,910** |
 
 >  **Tip:** Request budget from department. Many schools have ₱5,000–₱10,000 capstone budget per group.
 
@@ -247,11 +247,10 @@ Each week includes:
 ## References for Students
 
 1. Firebase-ESP-Client Library: https://github.com/mobizt/Firebase-ESP-Client
-2. Pyrebase4: https://github.com/nhorvath/Pyrebase4
+
 3. XGBoost Documentation: https://xgboost.readthedocs.io/
 4. Scikit-learn Isolation Forest: https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html
 5. YF-S201 Datasheet: https://www.adafruit.com/product/828
 6. ESP32 Arduino Core: https://github.com/espressif/arduino-esp32
-7. PythonAnywhere: https://www.pythonanywhere.com/
-8. Firebase Console: https://console.firebase.google.com/
-9. Makerlab Electronics: https://shopee.ph/makerlabelectronics
+7. Firebase Console: https://console.firebase.google.com/
+8. Makerlab Electronics: https://shopee.ph/makerlabelectronics

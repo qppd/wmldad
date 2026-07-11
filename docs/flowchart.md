@@ -1,4 +1,4 @@
-# Flowchart — Water Meter with Leak Detection (ESP32 → Firebase → PythonAnywhere)
+# Flowchart — Water Meter with Leak Detection (ESP32 → Firebase → RPi Backend)
 
 ## 1. Main System Flow (High-Level)
 
@@ -43,7 +43,7 @@ flowchart TD
 
 </details>
 
-## 2. Firebase Data Flow (ESP32 → Firebase → PythonAnywhere)
+## 2. Firebase Data Flow (ESP32 → Firebase → RPi)
 
 > Mermaid-based diagram (SVG export removed; source below)
 
@@ -69,8 +69,8 @@ flowchart LR
         M[(/models)] --> N
     end
     
-    subgraph "PythonAnywhere (Pyrebase4)"
-        O[Pyrebase4 Stream<br/>Listener] --> I
+    subgraph "RPi (Firebase Admin SDK)"
+        O[Firebase Admin SDK<br/>Poll Listener] --> I
         O --> P[Extract Features]
         P --> Q[XGBoost Inference]
         P --> R[Isolation Forest<br/>Anomaly Score]
@@ -113,7 +113,7 @@ flowchart TD
 
 </details>
 
-## 4. Feature Extraction Flow (PythonAnywhere)
+## 4. Feature Extraction Flow (RPi Backend)
 
 > Mermaid-based diagram (SVG export removed; source below)
 
@@ -271,7 +271,7 @@ flowchart LR
     C --> D[ Feature<br/>Extraction]:::firmware
     D --> E[ Firebase<br/>ESP-Client]:::firmware
     E --> F[ Firebase<br/>Realtime DB]:::cloud
-    F --> G[ Pyrebase4<br/>Listener]:::backend
+    F --> G[ Firebase Admin SDK<br/>Poll]:::backend
     G --> H[ XGBoost<br/>Inference]:::ml
     G --> I[ Isolation<br/>Forest]:::ml
     H --> J[ Alert<br/>Engine]:::backend

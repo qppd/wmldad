@@ -1,6 +1,6 @@
 # Technology Stack — Water Meter with Leak Detection
 
-> **Architecture:** Sensors → ESP32 → Firebase Realtime DB → PythonAnywhere → XGBoost → Dashboard
+> **Architecture:** Sensors → ESP32 → Firebase Realtime DB → RPi → XGBoost → Dashboard
 
 ---
 
@@ -13,7 +13,7 @@
 | **YF-S201 Flow Sensor** | 1/2" thread, Hall-effect pulse output, 450 PPL nominal | 5 | Industry-standard for Arduino/ESP32 projects, cheap & reliable |
 | **Check Valve 1/2"** | Brass or PVC, non-return | 4 | Prevents backflow between fixtures (critical for per-fixture monitoring) |
 | **Solenoid Valve 1/2" NC** | 12V, Normally Closed | 4–5 | Automatic shutoff per fixture when leak detected |
-| **4-Ch Relay Module** | 5V, optocoupler isolated, active LOW | 1 | Drives solenoid valves from ESP32 GPIO |
+| **4-Ch Relay Module** (or 5-ch) | 5V, optocoupler isolated, active LOW | 1 | Drives solenoid valves (5 valves = 5-ch relay) |
 | **OLED 128×64** | SSD1306, I²C, 0.96" | 1 | Live display of per-fixture readings |
 | **Micro SD Card Module** | SPI interface | 1 | Data backup during WiFi/Firebase outages |
 | **Active Buzzer** | 5V | 1 | Audible alarm on leak detection |
@@ -80,9 +80,9 @@ if (fbData.streamAvailable()) {
 | Feature | Usage |
 |---------|-------|
 | **Data structure** | JSON tree: `/readings/{device_id}/{timestamp}`, `/alerts/{alert_id}`, `/commands/{device_id}` |
-| **Authentication** | Email/Password or Anonymous for ESP32; Service Account for PythonAnywhere |
+| **Authentication** | Email/Password or Anonymous for ESP32; Service Account for the RPi backend |
 | **Security Rules** | Validate schema, restrict write paths per device |
-| **Streaming** | ESP32 listens on `/commands`, PythonAnywhere listens on `/readings` via Pyrebase4 stream |
+| **Streaming** | ESP32 listens on `/commands`, RPi polls `/readings` via Firebase Admin SDK |
 | **Storage** | Free tier: 1 GB, 100 simultaneous connections, 10 GB/month bandwidth |
 | **Pricing** | Spark (free) is sufficient for 1–5 devices. Blaze (pay-as-you-go) for production. |
 
@@ -90,18 +90,19 @@ if (fbData.streamAvailable()) {
 
 ---
 
-## PythonAnywhere Backend Stack
+## Raspberry Pi Backend Stack
 
 | Layer | Technology | Version | Purpose |
 |-------|------------|---------|---------|
-| **Hosting** | PythonAnywhere (paid tier) | — | Always-on Flask app on cloud |
+| **Hardware** | Raspberry Pi 3B+/4/5 | — | Local always-on Flask server, ML inference |
+| **OS** | Raspberry Pi OS (64-bit) | Bookworm | Stable Linux distribution for ARM |
 | **Language** | Python | ≥ 3.9 | ML ecosystem, Firebase SDK |
 | **Web Framework** | Flask | ≥ 2.x | Web dashboard + REST API endpoints |
-| **Firebase Client** | [pyrebase4](https://github.com/nhorvath/Pyrebase4) | ≥ 4.6 | Firebase Real-time DB read/write + stream |
+| **Firebase Client** | [firebase-admin](https://github.com/firebase/firebase-admin-python) | ≥ 6.0 | Firebase Realtime DB read/write (official SDK) |
 | **ML (primary)** | [XGBoost](https://xgboost.readthedocs.io/) | ≥ 2.0 | Gradient-boosted decision tree — leak classification |
 | **ML (anomaly)** | [scikit-learn](https://scikit-learn.org/) (IsolationForest) | ≥ 1.3 | Unsupervised anomaly detection |
 | **Data** | pandas, numpy | Latest | Feature engineering |
-| **Scheduling** | PythonAnywhere task scheduler | — | Daily model retraining |
+| **Scheduling** | systemd + cron | Built-in | Daily model retraining via cron |
 | **Templates** | Jinja2 + Chart.js | — | Dashboard HTML/JS |
 | **Notifications** | Telegram Bot API / smtplib | — | Alert delivery |
 
@@ -111,8 +112,8 @@ if (fbData.streamAvailable()) {
 
 | Model | Type | Framework | Task | Where it runs |
 |-------|------|-----------|------|--------------|
-| **XGBoost** | Gradient-boosted decision tree | xgboost Python | 4-class classification (normal, minor_leak, major_leak, anomaly) | PythonAnywhere |
-| **Isolation Forest** | Unsupervised ensemble | scikit-learn | Binary anomaly/not-anomaly | PythonAnywhere |
+| **XGBoost** | Gradient-boosted decision tree | xgboost Python | 4-class classification (normal, minor_leak, major_leak, anomaly) | RPi (Flask) |
+| **Isolation Forest** | Unsupervised ensemble | scikit-learn | Binary anomaly/not-anomaly | RPi (Flask) |
 
 ### Feature Set (9 features)
 
@@ -150,7 +151,7 @@ if (fbData.streamAvailable()) {
 | **Charts** | Chart.js (real-time line/bar charts) |
 | **Real-time** | Server-Sent Events (SSE) from Flask, or periodic fetch |
 | **Styling** | Bootstrap 5 / Tailwind CSS |
-| **Deployment** | PythonAnywhere Web tab — WSGI config |
+| **Deployment** | RPi Flask — systemd service |
 
 ---
 
@@ -161,11 +162,11 @@ if (fbData.streamAvailable()) {
 | Sensor → ESP32 | Pulse (GPIO interrupt) | Rising edge | Continuous |
 | ESP32 → Firebase | HTTPS | JSON | Every 5–60s |
 | Firebase → ESP32 | SSE (stream) | JSON | Real-time |
-| Firebase → PythonAnywhere | SSE (Pyrebase4 stream) | JSON | Real-time |
-| PythonAnywhere → Firebase | HTTPS (REST) | JSON | On ML result |
-| PythonAnywhere → Dashboard | HTTP (Flask) | HTML/JSON | On page load |
-| PythonAnywhere → Firebase | HTTPS (Alert write) | JSON | On leak detection |
-| PythonAnywhere → Telegram | HTTPS (Bot API) | Form | On leak alert |
+| Firebase → RPi | Poll (HTTP) | REST | On load / every 5s |
+| RPi → Firebase | HTTPS (REST) | JSON | On ML result |
+| RPi → Dashboard | HTTP (Flask) | HTML/JSON | On page load |
+| RPi → Firebase | HTTPS (Alert write) | JSON | On leak detection |
+| RPi → Telegram | HTTPS (Bot API) | Form | On leak alert |
 
 ---
 
@@ -177,7 +178,7 @@ if (fbData.streamAvailable()) {
 | **Python 3.9+** | ML training, backend development |
 | **Jupyter / Google Colab** | ML model prototyping and experimentation |
 | **Firebase Console** | Database management, rules, authentication |
-| **PythonAnywhere Console** | Backend debugging, log viewing |
+| **RPi console (ssh)** | Backend debugging, log viewing |
 | **Postman** | API testing |
 | **Serial Monitor** | ESP32 debug output |
 | **Git + GitHub** | Version control |
@@ -188,10 +189,10 @@ if (fbData.streamAvailable()) {
 
 | Requirement | Chosen | Alternatives Considered | Why This Won |
 |-------------|--------|------------------------|--------------|
-| Real-time DB | Firebase | Custom Node.js server, Supabase, AWS IoT | Managed, free tier, SSE streaming, ESP32 library |
-| ESP32 → Cloud | Firebase-ESP-Client | HTTP client, MQTT, Blynk | Full Firebase API (stream + write), well-maintained |
-| Python → Firebase | Pyrebase4 | firebase-admin, rest-client | Stream support, PythonAnywhere compatible |
-| ML Model | XGBoost | Random Forest, LightGBM, CNN | Best accuracy for tabular time-series, faster than RF, better calibrated probabilities |
-| Anomaly Detection | Isolation Forest | Autoencoder, One-Class SVM | Unsupervised, low memory, interpretable |
-| Cloud Hosting | PythonAnywhere | Heroku, Railway, AWS Free Tier | Philippine-friendly (no credit card needed for basic), pre-installed pip |
-| ESP32 Board | 38-pin NodeMCU-32S | 30-pin, ESP32-C3, ESP8266 | More GPIOs for 5 sensors + relays + peripherals |
+| Firebase | Custom Node.js server, Supabase, AWS IoT | Managed, free tier, SSE streaming, ESP32 library |
+| Firebase-ESP-Client | HTTP client, MQTT, Blynk | Full Firebase API (stream + write), well-maintained |
+| Firebase Admin SDK | firebase-admin | Official SDK, best support |
+| XGBoost | Random Forest, LightGBM, CNN | Best for tabular time-series |
+| Isolation Forest | Autoencoder, One-Class SVM | Unsupervised, low memory |
+| RPi (Raspberry Pi) | Heroku, Railway, cloud VPS | One-time cost, no monthly fees, full local control |
+| ESP32 38-pin NodeMCU-32S | 30-pin, ESP32-C3, ESP8266 | More GPIOs for 5 sensors + relays |

@@ -242,8 +242,7 @@ void IRAM_ATTR pulseCounterISR(void* arg) {
 
 void SensorManager::begin() {
     for (int i = 0; i < NUM_SENSORS; i++) {
-        pinMode(sensors[i].gpio, INPUT_PULLUP);
-        // Attach ISR — works because different GPIOs have different interrupt entries
+        pinMode(sensors[i].gpio, INPUT);  // GPIO 34/35 are input-only — external pull-up required
         attachInterruptArg(
             digitalPinToInterrupt(sensors[i].gpio),
             pulseCounterISR,
@@ -331,7 +330,11 @@ These run on the ESP32 when Firebase/ML is unreachable — they're less accurate
 
 // === Sensors ===
 #define NUM_SENSORS      5
-#define PULSE_PER_LITER  450.0   // Calibration value (adjust per sensor)
+#define PPL_INLET        450.0   // Calibrate per sensor — see calibration guide
+#define PPL_FIXTURE1     450.0
+#define PPL_FIXTURE2     450.0
+#define PPL_FIXTURE3     450.0
+#define PPL_FIXTURE4     450.0
 #define DEBOUNCE_MS      5       // Debounce in milliseconds
 
 // === Timing (milliseconds) ===
@@ -411,13 +414,13 @@ These run on the ESP32 when Firebase/ML is unreachable — they're less accurate
     "commands": {
       "$device_id": {
         ".read": "auth.uid === $device_id",
-        ".write": "auth.uid === 'pythonanywhere' || auth.uid === 'dashboard'"
+        ".write": "auth.uid === 'rpi-backend' || auth.uid === 'dashboard'"
       }
     },
     "alerts": {
       "$device_id": {
-        ".read": "auth.uid === $device_id || auth.uid === 'pythonanywhere'",
-        ".write": "auth.uid === 'pythonanywhere'"
+        ".read": "auth.uid === $device_id || auth.uid === 'rpi-backend'",
+        ".write": "auth.uid === 'rpi-backend'"
       }
     }
   }

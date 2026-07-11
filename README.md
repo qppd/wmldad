@@ -1,21 +1,21 @@
 #  Water Meter with Leak Detection & Anomaly Detection System
 
-> **A Capstone / Research Project** — Smart Water Monitoring System that detects leaks, anomalies, and per-fixture consumption using ESP32, Firebase, PythonAnywhere, and Machine Learning (XGBoost).
+> **A Capstone / Research Project** — Smart Water Monitoring System that detects leaks, anomalies, and per-fixture consumption using ESP32, Firebase, Raspberry Pi, and Machine Learning (XGBoost).
 
 ---
 
 ##  Project Overview
 
-A complete IoT system that monitors water consumption across multiple fixtures in a building, detects leaks in real-time, and identifies anomalous usage patterns using machine learning.
+A complete IoT system that monitors water consumption across multiple fixtures in a building, detects leaks in real-time, and identifies anomalous usage patterns using machine learning on a **Raspberry Pi**.
 
 ### How It Works
 
 ```
-[Inlet Flow Sensor] ─┐
-[Fixture 1 Sensor] ──┤
-[Fixture 2 Sensor] ──┤──→ ESP32 → Firebase Realtime DB → PythonAnywhere → XGBoost ML
-[Fixture 3 Sensor] ──┤                                              ↓
-[Fixture 4 Sensor] ──┘                                    Leak Alert / Dashboard
+|[Inlet Flow Sensor] ─┐
+|[Fixture 1 Sensor] ──┤
+|[Fixture 2 Sensor] ──┤──→ ESP32 → Firebase Realtime DB → RPi (Flask + ML)
+|[Fixture 3 Sensor] ──┤                                              ↓
+|[Fixture 4 Sensor] ──┘                                    Leak Alert / Dashboard
 ```
 
 ### Key Features
@@ -25,9 +25,9 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 -  **Real-time Firebase Sync** — data streamed via [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client)
 -  **XGBoost ML Model** — detects leaks, anomalies, and usage patterns (server-side)
 -  **Isolation Forest** — unsupervised anomaly detection for unknown patterns
--  **PythonAnywhere Backend** — connects to Firebase via Pyrebase4
+-  **RPi Backend** — Flask + Firebase Admin SDK + XGBoost
 -  **Check Valves** — prevent backflow between fixtures
--  **Web Dashboard** — real-time monitoring via PythonAnywhere web app
+-  **Web Dashboard** — real-time monitoring via RPi Flask dashboard
 -  **Solenoid Valve Control** — automatic shutoff on leak detection
 -  **Local Data Logging** — SD card backup when offline
 
@@ -61,14 +61,14 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 │     - /commands/{device_id} → valve control from dashboard       │
 │     - /models/{version} → ML model metadata                      │
 └──────────────────────────────────────────────────────────────────┘
-                               ↓ (Pyrebase4 stream + REST)
+                               ↓ (Firebase Admin SDK polling)
 ┌──────────────────────────────────────────────────────────────────┐
-│                      PYTHONANYWHERE ( Backend)                   │
-│  • Pyrebase4 — Firebase listener (real-time stream)               │
+│                      RPi BACKEND                                  │
+│  • Firebase Admin SDK — Firebase polling + writes                │
 │  • XGBoost Model — leak classification (normal/minor/major)      │
 │  • Isolation Forest — unsupervised anomaly detection             │
 │  • Flask Web App — dashboard + API endpoints                     │
-│  • Alert Engine — email/SMS/Telegram notifications               │
+│  • Alert Engine — Telegram notifications                         │
 │  • Daily Retraining Pipeline — model improvement over time       │
 └──────────────────────────────────────────────────────────────────┘
 ```
@@ -88,7 +88,7 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 | [Firmware Guide](./docs/firmware.md) | ESP32 code structure, Firebase-ESP-Client usage |
 | [Setup Guide](./docs/setup.md) | Step-by-step from zero to working system |
 | [Calibration Guide](./docs/calibration.md) | Sensor calibration procedures |
-| [PythonAnywhere App](./docs/pythonanywhere-app.md) | Deploying the backend on PythonAnywhere |
+| [RPi Backend App](./docs/rpi-backend.md) | Deploying the backend on Raspberry Pi |
 | [Bill of Materials](./docs/bom.md) | Complete parts list with prices & links (Makerlab) |
 | [Troubleshooting](./docs/troubleshooting.md) | Common issues and solutions |
 | [Project Timeline](./docs/project-timeline.md) | Student capstone timeline with milestones |
@@ -101,7 +101,7 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 - 9 input features (flow rate, duration, time patterns, fixture ID, etc.)
 - 4 output classes: `normal`, `minor_leak`, `major_leak`, `anomaly`
 - Accuracy target: ≥ 95%
-- Trained on PythonAnywhere, served via Flask API
+- Trained on RPi, served via Flask API
 
 **Secondary:** Isolation Forest — catches unknown/unseen anomaly patterns
 - Unsupervised — no training labels needed
@@ -128,10 +128,11 @@ cd water-meter
 #    - Select port: Tools -> Port -> COMx
 #    - Click Sketch -> Upload (Ctrl+U)
 
-# 4. Deploy PythonAnywhere backend
-#    - Upload the pythonanywhere/ folder to PythonAnywhere
-#    - Configure Pyrebase4 with your Firebase credentials
-#    - Set up Flask web app
+# 4. Deploy RPi backend
+#    - Set up Raspberry Pi with Python 3.9+
+#    - Install dependencies: pip install -r rpi/requirements.txt
+#    - Run Flask app on RPi
+#    (Or use systemd service for auto-start)
 
 # 5. Train the model
 #    - Upload training/water_meter_ml_training.ipynb to Google Colab
@@ -173,7 +174,7 @@ water-meter/
 │   ├── firmware.md
 │   ├── setup.md
 │   ├── calibration.md
-│   ├── pythonanywhere-app.md
+│   ├── rpi-backend.md
 │   ├── bom.md
 │   ├── troubleshooting.md
 │   └── project-timeline.md
@@ -191,9 +192,9 @@ water-meter/
 │   ├── alert_manager.h          # Buzzer + LED alerts
 │   ├── ntp_sync.h               # NTP time sync
 │   └── led_indicator.h          # Status LED patterns
-├── pythonanywhere/           # PythonAnywhere backend
+├── rpi/                  # RPi backend (Flask + ML)
 │   ├── app.py                # Flask web app
-│   ├── firebase_listener.py  # Pyrebase4 stream listener
+│   ├── firebase_listener.py  # Firebase Admin SDK polling
 │   ├── ml_inference.py       # XGBoost + Isolation Forest
 │   ├── alert_engine.py       # Notification system
 │   └── requirements.txt
@@ -203,7 +204,7 @@ water-meter/
 ├── model/                    # Trained models
 │   ├── xgboost_model.json
 │   └── isolation_forest.pkl
-├── hardware/                  # CAD, Fritzing, enclosure designs
+├── wiring/                  # CAD, Fritzing, enclosure designs
 │   └── water-meter-wiring.fzz
 └── README.md
 ```

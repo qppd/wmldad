@@ -120,13 +120,13 @@ Normal: balance < 10% of inlet
 | PushJSON returned error | Payload too large | Reduce data per push (limit to ~16KB) |
 | Stream not receiving | Permission denied | Check security rules |
 
-### PythonAnywhere → Firebase
+### RPi → Firebase
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| Pyrebase4 ImportError | Not installed | `pip install pyrebase4` |
+| firebase-admin ImportError | Not installed | `pip install firebase-admin` |
 | "Invalid service account" | Wrong JSON key | Re-download from Firebase Console |
-| Stream not working | Background task killed | Use Hacker plan or scheduled task |
+| Stream not working | firebase-admin uses polling | Poll `/readings/` every 5s instead |
 | "403 Forbidden" | Security rules blocking | Check rules in Firebase Console |
 | Rate limited | Too many connections | Reduce polling frequency |
 
@@ -147,7 +147,7 @@ Normal: balance < 10% of inlet
 ### Model Evaluation Commands
 
 ```python
-# On PythonAnywhere or local
+# On RPi or local
 from ml_inference import LeakDetector
 detector = LeakDetector()
 print(f"Model loaded: {detector.model_loaded}")
@@ -162,17 +162,17 @@ print(result)
 
 ---
 
-## 6. PythonAnywhere Issues
+## 6. RPi (Raspberry Pi) Issues
 
 | Problem | Solution |
 |---------|----------|
-| **App not loading** | Check Web tab → Logs → Error log |
-| **"Internal Server Error"** | View server error log |
+| **App not loading** | Check Flask output: `journalctl -u water-meter.service -f` |
+| **"Internal Server Error"** | View Flask error log: `sudo journalctl -u water-meter.service --since "5 min ago"` |
 | **Module not found** | Activate venv → `pip install -r requirements.txt` |
-| **Memory error** | Free: 512 MB limit. Upgrade to Hacker ($5/mo) |
-| **Free account: stream dies** | Background thread not allowed on Free → use scheduled task every 5 min |
-| **File not found** | Check absolute paths in config.py |
-| **No disk space** | Clean up old log files and cached data |
+| **Memory error** | RPi 4 has 2-8GB RAM — check `free -h`. Reduce n_estimators in XGBoost if needed. |
+| **RPi not reachable** | Check network: `ping <rpi-ip>`. Ensure port 5000 is not blocked by firewall |
+| **RPi auto-start not working** | Check systemd: `sudo systemctl status water-meter.service` |
+| **SD card corruption** | Use a UPS and `sudo raspi-config` → Performance → Overlay File System for read-only root |
 
 ---
 
@@ -230,7 +230,7 @@ print(result)
 - [ ] Is the flow sensor arrow pointing WITH the water flow?
 - [ ] Are WiFi SSID and password correct?
 - [ ] Is Firebase Auth (Email/Password) enabled?
-- [ ] Is the Firebase service account key uploaded to PythonAnywhere?
+- [ ] Is the Firebase service account key on the RPi?
 - [ ] Is the virtual environment activated?
 - [ ] Did you run `pip install -r requirements.txt`?
 - [ ] Are the ML model files in the right path?

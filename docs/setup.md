@@ -14,7 +14,7 @@
 4. [Phase 4: Hardware Assembly](#phase-4-hardware-assembly)
 5. [Phase 5: ESP32 Firmware Upload](#phase-5-esp32-firmware-upload)
 6. [Phase 6: Sensor Calibration](#phase-6-sensor-calibration)
-7. [Phase 7: PythonAnywhere Backend](#phase-7-pythonanywhere-backend)
+7. [Phase 7: RPi Backend Setup](#phase-7-rpi-backend-setup)
 8. [Phase 8: ML Model Training](#phase-8-ml-model-training)
 9. [Phase 9: Testing the Full System](#phase-9-testing-the-full-system)
 10. [Phase 10: Enclosure & Deployment](#phase-10-enclosure--deployment)
@@ -54,7 +54,7 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 | **Python 3.9+** | ML training + backend | [python.org](https://www.python.org/) |
 | **Git** | Version control | [git-scm.com](https://git-scm.com/) |
 | **Google Chrome / Firefox** | Firebase console | — |
-| **PythonAnywhere Account** | Cloud hosting | [pythonanywhere.com](https://www.pythonanywhere.com/) |
+| **RPi Account** | Local server | Already have one |
 
 ---
 
@@ -99,7 +99,7 @@ cd water-meter
 cd training/
 pip install -r requirements.txt
 # or manually:
-pip install xgboost scikit-learn pandas numpy joblib flask pyrebase4
+pip install xgboost scikit-learn pandas numpy joblib flask firebase-admin
 ```
 
 ---
@@ -138,12 +138,12 @@ pip install xgboost scikit-learn pandas numpy joblib flask pyrebase4
    User Password: [the password you set]
    ```
 
-### Step 3.4: Create Service Account for PythonAnywhere
+### Step 3.4: Create Firebase Service Account
 
 1. Go to **Project Settings → Service accounts**
 2. Click **Generate new private key**
 3. **Save** the downloaded JSON file as `serviceAccountKey.json`
-4. This will be used by the PythonAnywhere backend
+4. This will be used by the RPi backend
 
 ### Step 3.5: Set Up Database Structure
 
@@ -317,33 +317,39 @@ For testing without actual plumbing:
 
 ---
 
-## Phase 7: PythonAnywhere Backend
+## Phase 7: RPi Backend Setup
 
-> Detailed guide: [PythonAnywhere App](./pythonanywhere-app.md)
+> **Detailed guide:** [RPi Backend App](./rpi-backend.md)
 
-### Quick Deploy
+### Quick Setup
 
-1. **Log in** to [pythonanywhere.com](https://www.pythonanywhere.com/)
-2. **Open a Bash console**
-3. **Upload project files:**
+1. **Get a Raspberry Pi 3B+/4/5** with Raspberry Pi OS (64-bit)
+2. **SSH into the RPi** or connect a monitor/keyboard
+3. **Clone the project:**
    ```bash
    git clone https://github.com/qppd/water-meter.git
-   cd water-meter/pythonanywhere/
+   cd water-meter/rpi/
    ```
 4. **Create virtual environment:**
    ```bash
-   python -m venv venv
+   python3 -m venv venv
    source venv/bin/activate
    pip install -r requirements.txt
    ```
-5. **Upload Firebase service account key** (`serviceAccountKey.json`)
-6. **Configure Flask app:**
-   - Go to **Web tab → Add a new web app**
-   - Select **Flask** → Python 3.9
-   - Set source code: `/home/youruser/water-meter/pythonanywhere/`
-   - Set WSGI file: click and edit to point to `app.py`
-7. **Reload web app**
-8. **Test:** Visit `https://youruser.pythonanywhere.com/`
+5. **Upload Firebase service account key** (`serviceAccountKey.json`) to the RPi
+6. **Run the Flask app:**
+   ```bash
+   python app.py
+   ```
+7. **Test:** Open a browser and visit `http://<rpi-ip>:5000/`
+8. **Set up auto-start** (optional):
+   ```bash
+   sudo cp water-meter.service /etc/systemd/system/
+   sudo systemctl enable water-meter.service
+   sudo systemctl start water-meter.service
+   ```
+
+> See [RPi Backend App](./rpi-backend.md) for complete setup instructions, systemd service config, and remote access setup.
 
 ---
 
@@ -376,15 +382,15 @@ Classification Report:
  major_leak      0.95      0.94      0.94
 ```
 
-Move trained models to PythonAnywhere (after training in Colab/Jupyter):
+Move trained models to the RPi (after training in Colab/Jupyter):
 ```bash
 # From Google Colab: download model files from the Files tab
 # (they appear as xgboost_leak_model.json, isolation_forest.pkl, scaler.pkl)
 
 # From Jupyter (local):
-cp training/xgboost_leak_model.json pythonanywhere/models/
-cp training/isolation_forest.pkl pythonanywhere/models/
-cp training/scaler.pkl pythonanywhere/models/
+cp training/xgboost_leak_model.json rpi/models/
+cp training/isolation_forest.pkl rpi/models/
+cp training/scaler.pkl rpi/models/
 ```
 
 ---
@@ -398,13 +404,13 @@ cp training/scaler.pkl pythonanywhere/models/
 3. Readings should update every 5 seconds
 4. Verify flow rate changes when you open/close faucets
 
-### Test 2: Firebase → PythonAnywhere
+### Test 2: Firebase → RPi
 
-1. Open your PythonAnywhere web app
+1. Open the RPi dashboard in a browser: `http://<rpi-ip>:5000/`
 2. Click Dashboard → should show latest readings
-3. Check PythonAnywhere console logs:
+3. Check the RPi logs:
    ```bash
-   tail -f /var/log/youruser.pythonanywhere.com.access.log
+   journalctl -u water-meter.service -f
    ```
 
 ### Test 3: ML Leak Detection
@@ -456,7 +462,7 @@ cp training/scaler.pkl pythonanywhere/models/
 
 1. Set up dashboard as home page
 2. Configure Telegram bot for mobile alerts
-3. Set PythonAnywhere task scheduler for daily model retraining
+3. Set up a cron job on RPi for daily model retraining
 4. Check Firebase usage dashboard monthly
 
 ---
@@ -482,9 +488,9 @@ cd training/
 jupyter notebook water_meter_ml_training.ipynb
 
 # Run Flask app locally
-cd pythonanywhere/ && python app.py
+cd rpi/ && python app.py
 
-# View PythonAnywhere logs
+# View RPi logs
 # Web tab -> Logs -> view server/error log
 
 # Firebase backup (via CLI)

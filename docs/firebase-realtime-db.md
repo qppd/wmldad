@@ -1,7 +1,7 @@
 # Firebase Realtime DB Schema
 
-> **Architecture:** ESP32 (Firebase-ESP-Client) ↔ Firebase Realtime DB ↔ PythonAnywhere (Pyrebase4)
-> **Data flow:** Sensors → ESP32 → Firebase → PythonAnywhere → XGBoost → Dashboard
+> **Architecture:** ESP32 (Firebase-ESP-Client) ↔ Firebase Realtime DB ↔ RPi (Firebase Admin SDK)
+> **Data flow:** Sensors → ESP32 → Firebase → RPi → XGBoost → Dashboard
 
 ---
 
@@ -112,7 +112,7 @@ This is the primary data path. The ESP32 pushes a new node every upload interval
 
 **Path:** `/commands/{device_id}/{command_id}`
 
-Written by **PythonAnywhere** or **Web Dashboard**, streamed to **ESP32** via Firebase-ESP-Client stream listener.
+Written by **RPi backend** or **Web Dashboard**, streamed to **ESP32** via Firebase-ESP-Client stream listener.
 
 ```json
 {
@@ -153,7 +153,7 @@ Written by **PythonAnywhere** or **Web Dashboard**, streamed to **ESP32** via Fi
 
 **Path:** `/alerts/{device_id}/{alert_id}`
 
-Written by **PythonAnywhere** (ML-based) or **ESP32** (local rules).
+Written by **RPi backend (ML-based)** or **ESP32** (local rules).
 
 ```json
 {
@@ -241,7 +241,7 @@ Written on device registration, updated by ESP32.
 
 **Path:** `/models/metadata`
 
-Used by PythonAnywhere to publish model info.
+Used by RPi backend to publish model info.
 
 ```json
 {
@@ -318,13 +318,13 @@ Dashboard-adjustable device parameters.
     "commands": {
       "$device_id": {
         ".read": "auth != null && auth.uid == $device_id",
-        ".write": "auth.uid == 'pythonanywhere-bot' || auth.uid == 'dashboard-admin'"
+        ".write": "auth.uid == 'rpi-backend' || auth.uid == 'dashboard-admin'"
       }
     },
     "alerts": {
       "$device_id": {
         ".read": "auth != null",
-        ".write": "auth.uid == 'pythonanywhere-bot' || auth.uid == $device_id"
+        ".write": "auth.uid == 'rpi-backend' || auth.uid == $device_id"
       }
     },
     "devices": {
@@ -335,7 +335,7 @@ Dashboard-adjustable device parameters.
     },
     "models": {
       ".read": "auth != null",
-      ".write": "auth.uid == 'pythonanywhere-bot'"
+      ".write": "auth.uid == 'rpi-backend'"
     },
     "config": {
       "$device_id": {
@@ -362,28 +362,27 @@ Dashboard-adjustable device parameters.
 
 ---
 
-## Pyrebase4 Code (PythonAnywhere)
+## Firebase Admin SDK Code (RPi Backend)
 
 ```python
-import pyrebase
+import firebase_admin
+from firebase_admin import credentials, db as firebase_db
 
-config = {
-    "apiKey": "AIzaSy...",
-    "authDomain": "your-project.firebaseapp.com",
-    "databaseURL": "https://your-project.firebaseio.com",
-    "storageBucket": "your-project.appspot.com",
-    "serviceAccount": "serviceAccountKey.json"  # Download from Firebase Console
-}
+# Initialize Firebase Admin SDK
+cred = credentials.Certificate("serviceAccountKey.json")
+firebase_admin.initialize_app(cred, {
+    "databaseURL": "https://your-project-default-rtdb.asia-southeast1.firebasedatabase.app"
+})
 
-firebase = pyrebase.initialize_app(config)
-db = firebase.database()
+DEVICE_ID = "wm_001"
 
-# Stream readings (real-time)
-def stream_handler(message):
-    print(f"Stream event: {message['event']} at {message['path']}")
-    data = message['data']
-    if data:
-        # Process with ML model
+# Poll latest readings
+ref = firebase_db.reference(f"readings/{DEVICE_ID}")
+readings = ref.order_by_key().limit_to_last(1).get()
+
+# Process data
+if readings:
+    for ts, data in readings.items():
         features = extract_features(data)
         prediction = xgboost_model.predict(features)
         if prediction != "normal":
@@ -393,19 +392,14 @@ def stream_handler(message):
                 "timestamp": get_timestamp(),
                 "fixture_index": data.get("fixture_index", -1)
             }
-            db.child("alerts").child(DEVICE_ID).push(alert_data)
+            firebase_db.reference(f"alerts/{DEVICE_ID}").push(alert_data)
 
-my_stream = db.child("readings").child(DEVICE_ID).stream(stream_handler, stream_id="readings_stream")
-
-# Read data on demand
-readings = db.child("readings").child(DEVICE_ID).order_by_key().limit_to_last(100).get()
-
-# Write data
-db.child("commands").child(DEVICE_ID).push({
+# Write a command to ESP32
+firebase_db.reference(f"commands/{DEVICE_ID}").push({
     "command": "close_fix1",
     "timestamp": get_timestamp(),
     "source": "ml_model"
 })
 
-# Full code: ./docs/pythonanywhere-app.md
+# Full code: ./docs/rpi-backend.md
 ```

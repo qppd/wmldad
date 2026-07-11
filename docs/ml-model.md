@@ -3,7 +3,7 @@
 > **Primary Model:** XGBoost (Gradient-Boosted Decision Trees)
 > **Secondary Model:** Isolation Forest (Unsupervised Anomaly Detection)
 > **Training Location:** Google Colab or Jupyter Notebook
-> **Inference Location:** PythonAnywhere (server-side)
+> **Inference Location:** RPi (Flask backend, server-side)
 
 ---
 
@@ -19,7 +19,7 @@
 | **Calibrated probabilities** |  Better confidence scores | Tends to be overconfident |
 | **Overfitting control** |  Built-in regularization | Needs careful tuning |
 | **Feature importance** |  Native + SHAP | Gini importance only |
-| **PythonAnywhere support** |  Pre-installed via `pip install xgboost` |  Pre-installed |
+| **RPi support** |  Runs on ARM: `pip install xgboost` |  Works on RPi |
 | **Inference speed** |  < 1ms | < 5ms |
 
 **Verdict:** XGBoost wins for tabular time-series data with clear decision boundaries like water consumption patterns.
@@ -28,7 +28,7 @@
 
 - **Unsupervised** — doesn't need labeled data to find anomalies
 - **Catches what XGBoost misses** — unknown patterns not in training data
-- **Lightweight** — runs in < 1ms on PythonAnywhere
+- **Lightweight** — runs in < 1ms on RPi (ARM CPU)
 - **Complementary** — XGBoost classifies known patterns, Isolation Forest flags unknowns
 
 ---
@@ -387,10 +387,10 @@ def generate_training_data(n_samples=100000):
 ## Model Retraining Pipeline
 
 Models are retrained in **Google Colab or Jupyter Notebook** using `training/water_meter_ml_training.ipynb`.
-After retraining, export the model files and upload to PythonAnywhere.
+After retraining, copy the model files to the RPi.
 
 ```python
-# Scheduled daily on PythonAnywhere
+# Scheduled daily on RPi (via cron)
 def daily_retrain():
     # 1. Query new labeled data from Firebase
     new_data = query_firebase_labeled_data()

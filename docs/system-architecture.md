@@ -2,9 +2,9 @@
 
 ## Overview
 
-Smart water monitoring system with **fixture-level leak detection** using **ESP32 → Firebase → PythonAnywhere → XGBoost ML**.
+Smart water monitoring system with **fixture-level leak detection** using **ESP32 → Firebase → RPi → XGBoost ML**.
 
-The system uses 1 inlet flow sensor to measure total consumption and 4 fixture flow sensors to monitor individual water outlets. Data flows from the ESP32 to Firebase Realtime DB via the [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) library (stream + regular calls). A PythonAnywhere backend consumes the Firebase data using Pyrebase4, runs **XGBoost** and **Isolation Forest** ML models, and serves a web dashboard.
+The system uses 1 inlet flow sensor to measure total consumption and 4 fixture flow sensors to monitor individual water outlets. Data flows from the ESP32 to Firebase Realtime DB via the [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) library (stream + regular calls). A **Raspberry Pi** backend consumes the Firebase data using the Firebase Admin SDK, runs **XGBoost** and **Isolation Forest** ML models, and serves a web dashboard.
 
 ---
 
@@ -53,17 +53,17 @@ graph TB
         Models["/models/{version}<br/>ML metadata"]
     end
 
-    subgraph "PythonAnywhere Backend"
+    subgraph "RPi Backend"
         direction TB
-        Pyrebase["Pyrebase4 Listener<br/>(Stream + REST)"]
+        FBAdmin["Firebase Admin SDK<br/>(Poll + Write)"]
         XGB["XGBoost Classifier<br/>normal / minor_leak / major_leak"]
         ISO["Isolation Forest<br/>Unsupervised Anomaly Detection"]
         Flask["Flask Web App<br/>Dashboard + API"]
         AlertEngine["Alert Engine<br/>Email / Telegram"]
         Retrain["Daily Retrain Pipeline"]
         
-        Pyrebase --> XGB
-        Pyrebase --> ISO
+        FBAdmin --> XGB
+        FBAdmin --> ISO
         XGB --> Flask
         ISO --> Flask
         Flask --> AlertEngine
@@ -86,9 +86,9 @@ graph TB
     FirebaseClient --> Alerts
     Commands --> FirebaseClient
     
-    Readings --> Pyrebase
-    Alerts --> Pyrebase
-    Commands --> Pyrebase
+    Readings --> FBAdmin
+    Alerts --> FBAdmin
+    Commands --> FBAdmin
     
     Flask --> Dashboard
     AlertEngine --> Notif
@@ -121,8 +121,8 @@ Step 3: FIREBASE UPLOAD (every 5–60 seconds via Firebase-ESP-Client)
         → Write to /readings/{device_id}/{timestamp}
         → Stream listener for /commands/{device_id}
 
-Step 4: PYTHONANYWHERE PROCESSING (real-time via Pyrebase4 stream)
-        → Listen to /readings/{device_id}
+Step 4: RPi PROCESSING (polling via Firebase Admin SDK)
+        → Poll /readings/{device_id} for new data
         → Extract features for ML
         → Run XGBoost inference
         → Run Isolation Forest anomaly score
@@ -143,8 +143,8 @@ Step 5: USER ACTION
 |------|--------|----------|---------|
 | ESP32 → Firebase | Write + Stream | HTTPS/SSE | Firebase-ESP-Client |
 | Firebase → ESP32 | Stream Listener | Server-Sent Events | Firebase-ESP-Client |
-| PythonAnywhere → Firebase | Read + Stream + Write | REST/SSE | Pyrebase4 |
-| Firebase → PythonAnywhere | Stream Listener | Server-Sent Events | Pyrebase4 |
+| RPi → Firebase | Read + Write | REST | Firebase Admin SDK |
+| Firebase → RPi | Poll (HTTP) | REST | Firebase Admin SDK |
 | User → Dashboard | HTTP/WebSocket | HTTPS | Flask + JavaScript |
 | Dashboard → Valve | Write to /commands | HTTPS | Fetch API |
 
@@ -156,8 +156,8 @@ Step 5: USER ACTION
 |----------|-----------|
 | **Firebase over custom server** | Managed real-time DB, built-in auth, no server maintenance |
 | **Firebase-ESP-Client** | Most mature Firebase library for ESP32, supports streaming (SSE) |
-| **Pyrebase4** | Python Firebase client with stream support for PythonAnywhere |
-| **XGBoost on PythonAnywhere** | More powerful than edge ML — no model size limits, faster training, GPU support |
+| **Firebase Admin SDK (RPi)** | Official Python SDK for Firebase — full Realtime DB read/write |
+| **RPi over cloud hosting** | Local processing — no monthly fees, full control, no internet dependency for LAN dashboard |
 | **Isolation Forest + XGBoost** | XGBoost for known leak patterns, Isolation Forest for unknown anomalies |
 | **Check Valves per Fixture** | Prevents backflow contamination between fixtures |
 | **SD Card Backup** | Survives WiFi/Firebase outages — data never lost |

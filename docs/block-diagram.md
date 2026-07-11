@@ -1,4 +1,4 @@
-# Block Diagram — Water Meter with Leak Detection (ESP32 → Firebase → PythonAnywhere)
+# Block Diagram — Water Meter with Leak Detection (ESP32 → Firebase → RPi)
 
 ## System Block Diagram
 
@@ -80,7 +80,7 @@ block-beta
     block:cloud:7
         columns 7
         Firebase[" Firebase<br/>Realtime DB"]:3
-        PyAny[" PythonAnywhere<br/>XGBoost + Flask"]:4
+        RPi[" Raspberry Pi<br/>Flask + ML"]:4
     end
     
     FS_In --> P34
@@ -93,7 +93,7 @@ block-beta
     Relay --> SV
     
     MCU --> Firebase
-    Firebase --> PyAny
+    Firebase --> RPi
 ```
 
 </details>
@@ -119,7 +119,7 @@ block-beta
 | **Buzzer** | GPIO 4 | GPIO header | Active buzzer (+ leg to GPIO, - to GND) |
 | **Status LED** | GPIO 2 | Onboard | Built-in LED (active HIGH) |
 | **RGB LED** | GPIO 5 | GPIO header | Use transistor driver or RGB module |
-| **SD Card CS** | GPIO 5 | SPI header |  Conflict with RGB — use different pin or mux |
+| **SD Card CS** | GPIO **15** | SPI header |  ⚠️ GPIO 5 conflicts with RGB — use GPIO 15 instead for SD CS |
 | **SD Card MOSI** | GPIO 23 | SPI header | |
 | **SD Card MISO** | GPIO 19 | SPI header | |
 | **SD Card SCK** | GPIO 18 | SPI header | |
