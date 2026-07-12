@@ -42,7 +42,7 @@
 
 | # | Item | Qty | Unit (₱) | Total (₱) | Link |
 |---|------|-----|----------|-----------|------|
-| 15 | **5V 2A USB Power Adapter** (phone charger, QC compatible) | 1 | ₱150 | ₱150 | [Makerlab Shopee](https://shopee.ph/search?keyword=5v%202a%20power%20adapter%20makerlab) |
+| 15 | **Allan Superstore 12V 10A Power Supply** | 1 | ₱150 | ₱150 | [Allan Superstore Shopee](https://shopee.ph/Allan-Superstore-12v2a-12v5a-12v10a-12v15a-12v20a-12v30a-Power-Supply-For-Led-Sign-Signage-i.609565947.18030939950?extraParams=%7B%22display_model_id%22%3A191594807415%2C%22model_selection_logic%22%3A3%7D&sp_atk=8b44f1f9-e481-402b-a4b6-b68a26987663&xptdk=8b44f1f9-e481-402b-a4b6-b68a26987663) |
 | 16 | **USB to Micro USB Data Cable** (braided, 1m) | 1 | ₱120 | ₱120 | [Makerlab Shopee](https://shopee.ph/search?keyword=micro%20usb%20cable%20makerlab) |
 | 17 | **12V 2A Power Adapter** (for solenoid valves) | 1 | ₱200 | ₱200 | [Shopee Hardware](https://shopee.ph/search?keyword=12v%202a%20power%20adapter) |
 | 18 | **LM2596 DC-DC Step-Down Regulator** (optional, 12V→5V) | 1 | ₱100 | ₱100 | [Makerlab Shopee](https://shopee.ph/search?keyword=lm2596%20makerlab) |
@@ -52,66 +52,31 @@
 
 ---
 
-## 4. Display & Indicators
+## 4. Valve Control
 
 | # | Item | Qty | Unit (₱) | Total (₱) | Link |
 |---|------|-----|----------|-----------|------|
-| 20 | **OLED 128×64 Display** (SSD1306, I²C, 0.96") | 1 | ₱250 | ₱250 | [Makerlab Shopee](https://shopee.ph/search?keyword=oled%2012864%20ssd1306%20makerlab) |
-| 21 | **RGB LED Module** (common cathode) | 1 | ₱35 | ₱35 | [Makerlab Shopee](https://shopee.ph/search?keyword=rgb%20led%20module%20makerlab) |
-| 22 | **Active Buzzer Module** 5V | 1 | ₱30 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=active%20buzzer%20makerlab) |
-| 23 | **LED 5mm Assorted** (red, green, yellow, 10pc each) | 3 sets | ₱20 | ₱60 | [Makerlab Shopee](https://shopee.ph/search?keyword=led%205mm%20assorted%20makerlab) |
-
-**Display Subtotal:** **₱375**
-
----
-
-## 5. Valve Control
-
-| # | Item | Qty | Unit (₱) | Total (₱) | Link |
-|---|------|-----|----------|-----------|------|
-| 24 | **5-Channel Relay Module** 5V (optocoupler, active LOW, for 5 valves) | 1 | ₱350 | ₱350 | [Makerlab Shopee](https://shopee.ph/search?keyword=5%20channel%20relay%20makerlab) |
-| 25 | **Solenoid Valve** 1/2" NC 12V (or Motorized Ball Valve) | 5 | ₱350 | ₱1,750 | [Shopee Hardware](https://shopee.ph/search?keyword=solenoid%20valve%201%2F2%2012v) |
-| 26 | **1N4007 Diode** (flyback protection for relays) | 10 | ₱3 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=1n4007%20makerlab) |
-| 27 | **TIP120 Darlington Transistor** (solenoid driver) | 5 | ₱25 | ₱125 | [Makerlab Shopee](https://shopee.ph/search?keyword=tip120%20makerlab) |
+| 20 | **5-Channel Relay Module** 5V (optocoupler, active LOW, for 5 valves) | 1 | ₱350 | ₱350 | [Makerlab Shopee](https://shopee.ph/search?keyword=5%20channel%20relay%20makerlab) |
+| 21 | **Solenoid Valve** 1/2" NC 12V (or Motorized Ball Valve) | 5 | ₱350 | ₱1,750 | [Shopee Hardware](https://shopee.ph/search?keyword=solenoid%20valve%201%2F2%2012v) |
+| 22 | **1N4007 Diode** (flyback protection for relays) | 10 | ₱3 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=1n4007%20makerlab) |
+| 23 | **TIP120 Darlington Transistor** (solenoid driver) | 5 | ₱25 | ₱125 | [Makerlab Shopee](https://shopee.ph/search?keyword=tip120%20makerlab) |
 
 **Valve Control Subtotal:** **₱2,225**
 
 ---
 
-## 6. Data Storage & Networking
+## 5. Enclosure & Mounting
 
 | # | Item | Qty | Unit (₱) | Total (₱) | Link |
 |---|------|-----|----------|-----------|------|
-| 28 | **Micro SD Card Module** SPI | 1 | ₱60 | ₱60 | [Makerlab Shopee](https://shopee.ph/search?keyword=micro%20sd%20card%20module%20makerlab) |
-| 29 | **Micro SD Card** 16GB Class 10 | 1 | ₱180 | ₱180 | [Shopee Hardware](https://shopee.ph/search?keyword=micro%20sd%2016gb%20class10) |
-
-**Storage Subtotal:** **₱240**
-
----
-
-## 7. Enclosure & Mounting
-
-| # | Item | Qty | Unit (₱) | Total (₱) | Link |
-|---|------|-----|----------|-----------|------|
-| 30 | **ABS Project Enclosure Box** 200×120×70mm | 1 | ₱250 | ₱250 | [Makerlab Shopee](https://shopee.ph/search?keyword=project%20enclosure%20box%20abs%20makerlab) |
-| 31 | **Cable Glands** PG9 / PG11 (waterproof entry) | 6 | ₱15 | ₱90 | [Shopee Hardware](https://shopee.ph/search?keyword=cable%20gland%20pg9) |
-| 32 | **Heat Shrink Tube Set** (assorted sizes) | 1 | ₱60 | ₱60 | [Makerlab Shopee](https://shopee.ph/search?keyword=heat%20shrink%20tube%20makerlab) |
-| 33 | **Cable Ties** 100mm (100pc) | 1 | ₱30 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=cable%20tie%20makerlab) |
-| 34 | **M3 Screws + Standoffs Kit** (PCB mounting) | 1 | ₱60 | ₱60 | [Makerlab Shopee](https://shopee.ph/search?keyword=m3%20standoff%20makerlab) |
-| 35 | **Double-sided Tape / Velcro** (mounting sensors) | 1 | ₱30 | ₱30 | [Shopee Hardware](https://shopee.ph/search?keyword=double%20sided%20tape%20heavy%20duty) |
+| 24 | **ABS Project Enclosure Box** 200×120×70mm | 1 | ₱250 | ₱250 | [Makerlab Shopee](https://shopee.ph/search?keyword=project%20enclosure%20box%20abs%20makerlab) |
+| 25 | **Cable Glands** PG9 / PG11 (waterproof entry) | 6 | ₱15 | ₱90 | [Shopee Hardware](https://shopee.ph/search?keyword=cable%20gland%20pg9) |
+| 26 | **Heat Shrink Tube Set** (assorted sizes) | 1 | ₱60 | ₱60 | [Makerlab Shopee](https://shopee.ph/search?keyword=heat%20shrink%20tube%20makerlab) |
+| 27 | **Cable Ties** 100mm (100pc) | 1 | ₱30 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=cable%20tie%20makerlab) |
+| 28 | **M3 Screws + Standoffs Kit** (PCB mounting) | 1 | ₱60 | ₱60 | [Makerlab Shopee](https://shopee.ph/search?keyword=m3%20standoff%20makerlab) |
+| 29 | **Double-sided Tape / Velcro** (mounting sensors) | 1 | ₱30 | ₱30 | [Shopee Hardware](https://shopee.ph/search?keyword=double%20sided%20tape%20heavy%20duty) |
 
 **Enclosure Subtotal:** **₱520**
-
----
-
-## 8. Raspberry Pi Backend
-
-| # | Item | Qty | Unit (₱) | Total (₱) | Note |
-|---|------|-----|----------|-----------|------|
-| 36 | **Raspberry Pi 4/5** (or 3B+, if on hand) | 1 | ₱2,500 | ₱2,500 | One-time cost, runs Flask + ML locally |
-| 37 | **Telegram Bot** (free) | 1 | ₱0 | ₱0 | Alerts via [@BotFather](https://t.me/BotFather) |
-
-**Backend Subtotal:** **₱2,500**
 
 ---
 
