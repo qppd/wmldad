@@ -77,10 +77,5 @@
 
 **Enclosure Subtotal:** **₱520**
 ---
-## 8. Raspberry Pi Backend
-| # | Item | Qty | Unit (₱) | Total (₱) | Note |
-|---|------|-----|----------|-----------|------|
-| 29 | **Raspberry Pi 4/5** (or 3B+, if on hand) | 1 | ₱2,500 | ₱2,500 | One-time cost, runs Flask + ML locally |
-**Backend Subtotal:** **₱2,500**
----
+
 
