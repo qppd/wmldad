@@ -57,7 +57,7 @@
 | # | Item | Qty | Unit (₱) | Total (₱) | Link |
 |---|------|-----|----------|-----------|------|
 | 20 | **5-Channel Relay Module** 5V (optocoupler, active LOW, for 5 valves) | 1 | ₱350 | ₱350 | [Makerlab Shopee](https://shopee.ph/search?keyword=5%20channel%20relay%20makerlab) |
-| 21 | **Latching Solenoid Valve** 1/2" NC 12V (pulse to open/close, zero holding current) | 5 | ₱350 | ₱1,750 | [Lazada Search](https://www.lazada.com.ph/search/?q=latching%20solenoid%20valve%2012v%201%2F2) / [Shopee Search](https://shopee.ph/search?keyword=latching%20solenoid%20valve%2012v%201%2F2) |
+| 21 | **Latching (Bistable) Solenoid Valve** 1/2" 12V (pulse to open/close, zero holding current) | 5 | ₱350 | ₱1,750 | [Lazada: latching bistable](https://www.lazada.com.ph/search/?q=latching%20bistable%20solenoid%20valve%2012v%201%2F2) / [Shopee: latching bistable](https://shopee.ph/search?keyword=latching%20bistable%20solenoid%20valve%2012v%201%2F2) |
 | 22 | **1N4007 Diode** (flyback protection for relays) | 10 | ₱3 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=1n4007%20makerlab) |
 | 23 | **TIP120 Darlington Transistor** (solenoid driver) | 5 | ₱25 | ₱125 | [Makerlab Shopee](https://shopee.ph/search?keyword=tip120%20makerlab) |
 
