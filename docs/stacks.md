@@ -4,25 +4,6 @@
 
 ---
 
-## Hardware Stack
-
-| Component | Specification | Qty | Justification |
-|-----------|--------------|-----|---------------|
-| **ESP32 38-Pin Dev Board** | CP2102, Xtensa LX6 dual-core, WiFi + BLE | 1 | 5 simultaneous ISRs, WiFi stack, Firebase library support |
-| **ESP32 Expansion Board** | Screw terminals, labeled pinout, breadboard-friendly | 1 | Clean wiring for 5 sensors + peripherals |
-| **YF-S201 Flow Sensor** | 1/2" thread, Hall-effect pulse output, 450 PPL nominal | 5 | Industry-standard for Arduino/ESP32 projects, cheap & reliable |
-| **Check Valve 1/2"** | Brass or PVC, non-return | 4 | Prevents backflow between fixtures (critical for per-fixture monitoring) |
-| **Micro SD Card Module** | SPI interface | 1 | Data backup during WiFi/Firebase outages |
-| **Active Buzzer** | 5V | 1 | Audible alarm on leak detection |
-| **RGB LED Module** | Common cathode | 1 | Visual status indicator (normal/minor/major leak) |
-| **Power Supply** | 5V 2A USB adapter | 1 | Powers ESP32 + sensors |
-| **Breadboard + Jumpers** | 830 points + 65 wires | 1 set | Prototyping |
-| **ABS Project Box** | 200×120×70mm | 1 | Enclosure with cable glands |
-
-> See [BOM.md](./bom.md) for complete parts list with prices and purchase links.
-
----
-
 ## ESP32 Firmware Stack
 
 | Layer | Technology | Version | Purpose |
