@@ -14,13 +14,13 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 |[Inlet Flow Sensor] ─┐
 |[Fixture 1 Sensor] ──┤
 |[Fixture 2 Sensor] ──┤──→ ESP32 → Firebase Realtime DB → RPi (Flask + ML)
-|[Fixture 3 Sensor] ──┤                                              ↓
-|[Fixture 4 Sensor] ──┘                                    Leak Alert / Dashboard
+|[Fixture 3 Sensor] ──┘                                              ↓
+                                    Leak Alert / Dashboard
 ```
 
 ### Key Features
 
--  **1 Inlet + 4 Fixture Flow Sensors** — total consumption + per-fixture monitoring
+-  **1 Inlet + 3 Fixture Flow Sensors** — total consumption + per-fixture monitoring (bidet, kitchen, bathroom shower)
 -  **Fixture-Level Leak Detection** — exactly which fixture is leaking
 -  **Real-time Firebase Sync** — data streamed via [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client)
 -  **XGBoost ML Model** — detects leaks, anomalies, and usage patterns (server-side)
@@ -29,7 +29,7 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 -  **Check Valves** — prevent backflow between fixtures
 -  **Web Dashboard** — real-time monitoring via RPi Flask dashboard (7" touchscreen)
 -  **Remote Access** — port forwarding + Dynamic DNS for worldwide access
--  **Local Data Logging** — SD card backup when offline
+-  **Local Data Logging** — SPIFFS backup when offline
 
 ---
 
@@ -38,17 +38,17 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                      PLUMBING LAYER                              │
-│  Supply → Inlet Sensor → Check Valve → Junction → Fixture 1-4   │
-│                                         ↓ (×4)                   │
+│  Supply → Inlet Sensor → Check Valve → Junction → Fixture 1-3   │
+│                                         ↓ (×3)                   │
 │                                  [Sensor + Check Valve] → Faucet  │
 └──────────────────────────────────────────────────────────────────┘
                                ↓ (pulse signals)
 ┌──────────────────────────────────────────────────────────────────┐
 │                      ESP32 EDGE LAYER                             │
-│  • Pulse Counter (5× interrupts, debounced)                       │
+│  • Pulse Counter (4× interrupts, debounced)                       │
 │  • Local Feature Extraction (flow rate, volume, duration)         │
 │  • Firebase-ESP-Client → Firebase Realtime DB (stream + write)    │
-│  • SD Card Logger (offline backup)                                │
+│  • SPIFFS Logger (offline backup)                                 │
 └──────────────────────────────────────────────────────────────────┘
                                ↓ (HTTPS/SSE stream)
 ┌──────────────────────────────────────────────────────────────────┐
@@ -135,7 +135,7 @@ cd wmldad
 #    - Click Sketch -> Upload (Ctrl+U)
 
 # 4. Deploy RPi backend
-#    - Set up Raspberry Pi with Python 3.9+
+#    - Set up Raspberry Pi with Python 3.11+
 #    - Install dependencies: pip install -r rpi/requirements.txt
 #    - Copy firebase_config.json to rpi/
 #    - Run Flask app on RPi
@@ -157,11 +157,11 @@ See [Setup Guide](./docs/setup.md) for complete step-by-step instructions.
 |------|-----|-------------------|
 | ESP32 38-Pin Dev Board | 1 | ₱450 |
 | ESP32 38-Pin Expansion Board | 1 | ₱180 |
-| YF-S201 Flow Sensor | 5 | ₱900 |
-| Check Valve 1/2" | 4 | ₱480 |
+| YF-S201 Flow Sensor | 4 | ₱720 |
+| Check Valve 1/2" | 3 | ₱360 |
 | Breadboard + Jumpers | 1 set | ₱150 |
 | 5V Power Adapter + USB Cable | 1 | ₱250 |
-| **TOTAL** | | **~₱2,410** |
+| **TOTAL** | | **~₱2,110** |
 
 > Full BOM with links, alternatives, and pricing tiers: [BOM.md](./docs/bom.md)
 
@@ -188,12 +188,12 @@ wmldad/
 ├── src/                      # ESP32 firmware (Arduino C++ / .ino)
 │   ├── water-meter.ino          # Main Arduino sketch
 │   ├── config.h                 # WiFi, Firebase, sensor config
-│   ├── sensor_manager.h         # 5 sensor ISR management
+│   ├── sensor_manager.h         # 4 sensor ISR management
 │   ├── flow_sensor.h            # Pulse counter class
 │   ├── firebase_client.h        # Firebase-ESP-Client wrapper
 │   ├── local_rules.h            # Offline leak detection
 │   ├── wifi_manager.h           # WiFi connect + reconnect
-│   ├── data_logger.h            # SD card + SPIFFS logging
+│   ├── data_logger.h            # SPIFFS logging
 │   ├── alert_manager.h          # Buzzer + LED alerts
 │   ├── ntp_sync.h               # NTP time sync
 │   ├── ota_updater.h            # OTA firmware updates

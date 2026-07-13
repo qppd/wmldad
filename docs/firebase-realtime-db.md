@@ -43,28 +43,21 @@ This is the primary data path. The ESP32 pushes a new node every upload interval
           "total": 3500.0,
           "pulse_count": 405,
           "k_factor": 450,
-          "fixture_name": "kitchen_sink"
+          "fixture_name": "bidet"
         },
         "fixture_2": {
           "flow_rate": 0.0,
           "volume": 0.0,
           "total": 1200.0,
           "pulse_count": 0,
-          "fixture_name": "toilet"
+          "fixture_name": "kitchen"
         },
         "fixture_3": {
           "flow_rate": 0.2,
           "volume": 0.02,
           "total": 500.0,
           "pulse_count": 10,
-          "fixture_name": "wash_basin"
-        },
-        "fixture_4": {
-          "flow_rate": 0.0,
-          "volume": 0.0,
-          "total": 800.0,
-          "pulse_count": 0,
-          "fixture_name": "shower"
+          "fixture_name": "bathroom_shower"
         },
         "device": {
           "rssi": -65,
@@ -152,7 +145,7 @@ Written by **RPi backend (ML-based)** or **ESP32** (local rules).
     "wm_001": {
       "alert_001": {
         "fixture_index": 1,
-        "fixture_name": "kitchen_sink",
+        "fixture_name": "bidet",
         "alert_type": "minor_leak",
         "confidence": 0.87,
         "source": "xgboost",
@@ -200,12 +193,11 @@ Written on device registration, updated by ESP32.
       "location": "Quezon Province",
       "sensors": [
         {"id": 0, "name": "inlet", "fixture": "main_inlet", "pin": 34},
-        {"id": 1, "name": "fix1", "fixture": "kitchen_sink", "pin": 35},
-        {"id": 2, "name": "fix2", "fixture": "toilet", "pin": 32},
-        {"id": 3, "name": "fix3", "fixture": "wash_basin", "pin": 33},
-        {"id": 4, "name": "fix4", "fixture": "shower", "pin": 25}
+        {"id": 1, "name": "fix1", "fixture": "bidet", "pin": 35},
+        {"id": 2, "name": "fix2", "fixture": "kitchen", "pin": 32},
+        {"id": 3, "name": "fix3", "fixture": "bathroom_shower", "pin": 33}
       ],
-      "valves": [false, false, false, false, false],
+      "valves": [false, false, false, false],
       "status": {
         "online": true,
         "last_seen": "2026-07-10T08:00:00Z",
@@ -276,7 +268,6 @@ Dashboard-adjustable device parameters.
       "pulse_per_liter_fix1": 450,
       "pulse_per_liter_fix2": 450,
       "pulse_per_liter_fix3": 448,
-      "pulse_per_liter_fix4": 455,
       "leak_confirm_count": 3,
       "continuous_flow_minutes": 30,
       "confidence_threshold": 0.80,

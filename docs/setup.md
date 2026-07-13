@@ -31,13 +31,13 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 |------|-----|-------------------|
 | ESP32 38-pin Dev Board | 1 | ₱450 |
 | ESP32 38-pin Expansion Board | 1 | ₱180 |
-| YF-S201 Flow Sensor | 5 | ₱900 |
-| Check Valve 1/2" | 4 | ₱480 |
+| YF-S201 Flow Sensor | 4 | ₱720 |
+| Check Valve 1/2" | 3 | ₱360 |
 | Breadboard + Jumper Wires | 1 set | ₱150 |
 | USB Micro Data Cable | 1 | ₱100 |
 | 5V 2A USB Power Adapter | 1 | ₱150 |
 | 10kΩ Resistors | 10 | ₱20 |
-| **Minimum Total** | | **~₱1,950** |
+| **Minimum Total** | | **~₱1,880** |
 
 ### Required Tools
 
@@ -52,7 +52,7 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 | Software | Purpose | Download |
 |----------|---------|----------|
 | **Arduino IDE 2.x** | ESP32 build, upload, Serial Monitor | [arduino.cc](https://www.arduino.cc/en/software) |
-| **Python 3.9+** | ML training + backend | [python.org](https://www.python.org/) |
+| **Python 3.11+** | ML training + backend | [python.org](https://www.python.org/) |
 | **Git** | Version control | [git-scm.com](https://git-scm.com/) |
 | **Google Chrome / Firefox** | Firebase console | — |
 | **RPi Account** | Local server | Already have one |
@@ -75,12 +75,12 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 
 ### Step 2.2: Install Python
 
-1. Download Python 3.9+ from python.org
+1. Download Python 3.11+ from python.org
 2. **Important:** Check  **"Add Python to PATH"** during installation
 3. Verify:
    ```bash
    python --version
-   # Should show: Python 3.9.x or higher
+   # Should show: Python 3.11.x or higher
    ```
 
 ### Step 2.3: Clone the Project
@@ -178,7 +178,7 @@ The ESP32 expansion board makes wiring much easier. It provides:
 
 ### Step 4.2: Connect One Flow Sensor (Test Circuit First)
 
-Before connecting all 5 sensors, test with just one:
+Before connecting all 4 sensors, test with just one:
 
 ```
 YF-S201 Sensor          ESP32 Expansion Board
@@ -197,17 +197,16 @@ GPIO 34 ──── 10kΩ resistor ──── 3.3V
          └─── YF-S201 Yellow wire
 ```
 
-### Step 4.3: Connect All 5 Sensors
+### Step 4.3: Connect All 4 Sensors
 
 Once the test circuit works, connect all sensors:
 
 | Sensor | GPIO | Pull-up (10kΩ to 3.3V) |
 |--------|------|------------------------|
 | Inlet | 34 | Required (input-only pin) |
-| Fixture 1 | 35 | Required (input-only pin) |
-| Fixture 2 | 32 | Recommended |
-| Fixture 3 | 33 | Recommended |
-| Fixture 4 | 25 | Recommended |
+| Fixture 1 (Bidet) | 35 | Required (input-only pin) |
+| Fixture 2 (Kitchen) | 32 | Recommended |
+| Fixture 3 (Bathroom Shower) | 33 | Recommended |
 
 ### Step 4.4: Connect Peripherals
 
@@ -288,8 +287,8 @@ For testing without actual plumbing:
    Sensor 0 (inlet): ISR attached on GPIO 34
    Sensor 1 (fix1): ISR attached on GPIO 35
    Sensor 2 (fix2): ISR attached on GPIO 32
-   ...
-   Reading: inlet=0.00 L/min fix1=0.00 L/min fix2=0.00 L/min fix3=0.00 L/min fix4=0.00 L/min
+   Sensor 3 (fix3): ISR attached on GPIO 33
+   Reading: inlet=0.00 L/min fix1=0.00 L/min fix2=0.00 L/min fix3=0.00 L/min
    Data uploaded to Firebase
    ```
 
@@ -447,7 +446,7 @@ cp training/scaler.pkl rpi/models/
 ### Test 5: Offline Mode
 
 1. Disconnect WiFi from router
-2. ESP32 should continue logging to SD card
+2. ESP32 should continue logging to SPIFFS
 3. Readings should buffer locally
 4. When WiFi reconnects, data should sync to Firebase
 
@@ -497,13 +496,4 @@ cp training/scaler.pkl rpi/models/
 # Train ML model (Jupyter Notebook)
 cd training/
 jupyter notebook water_meter_ml_training.ipynb
-
-# Run Flask app locally
-cd rpi/ && python app.py
-
-# View RPi logs
-# Web tab -> Logs -> view server/error log
-
-# Firebase backup (via CLI)
-firebase database:get /readings > backup.json
 ```

@@ -105,7 +105,7 @@ void setupFirebase() {
 | `duration_seconds` | Seconds since water started flowing | int | 0–3600 |
 | `hour_of_day` | Hour (0–23) | int | 0–23 |
 | `day_of_week` | Day (0=Mon) | int | 0–6 |
-| `fixture_id` | One-hot encoded fixture | int | 0–4 |
+| `fixture_id` | One-hot encoded fixture | int | 0–3 |
 | `inlet_to_fixture_ratio` | Inlet rate ÷ fixture rate | float | 0.5–2.0 |
 | `rate_variance` | Flow rate variance (last 10s) | float | 0–10 |
 | `is_night_time` | Between 10PM–5AM | bool | 0/1 |
@@ -177,5 +177,5 @@ void setupFirebase() {
 | XGBoost | Random Forest, LightGBM, CNN | Best for tabular time-series |
 | Isolation Forest | Autoencoder, One-Class SVM | Unsupervised, low memory |
 | RPi (Raspberry Pi) | Heroku, Railway, cloud VPS | One-time cost, no monthly fees, full local control |
-| ESP32 38-pin NodeMCU-32S | 30-pin, ESP32-C3, ESP8266 | More GPIOs for 5 sensors + peripherals |
+| ESP32 38-pin NodeMCU-32S | 30-pin, ESP32-C3, ESP8266 | More GPIOs for 4 sensors + peripherals |
 | **Port Forwarding + DDNS** | Tailscale, ngrok, Cloudflare Tunnel | No third-party dependency, standard router feature |

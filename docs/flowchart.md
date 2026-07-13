@@ -10,16 +10,16 @@
 ```mermaid
 flowchart TD
     A[Power On] --> B[ESP32 Initialization]
-    B --> C[Initialize All 5 Flow Sensors<br/>+ Attach ISRs]
+    B --> C[Initialize All 4 Flow Sensors<br/>+ Attach ISRs]
     C --> D[Connect to WiFi]
     D --> E{Connected?}
     E -->|Yes| F[Initialize Firebase-ESP-Client]
-    E -->|No| G[Offline Mode<br/>→ SD Card Logging]
+    E -->|No| G[Offline Mode<br/>→ SPIFFS Logging]
     F --> H[Start Firebase Stream Listener<br/>(commands)]
     G --> I[Enter Main Loop]
     H --> I
     
-    I --> J[Read All Pulse Counters<br/>Sensors 1–5]
+    I --> J[Read All Pulse Counters<br/>Sensors 1–4]
     J --> K[Calculate Flow Metrics<br/>per Fixture]
     K --> L[Update Status LEDs / Buzzer]
     L --> M[Apply Local Leak Rules<br/>(non-ML fallback)]
@@ -30,7 +30,7 @@ flowchart TD
     
     O --> Q{Success?}
     Q -->|Yes| R[Clear Local Buffer]
-    Q -->|No| S[Save to SD Card Queue]
+    Q -->|No| S[Save to SPIFFS Queue]
     
     R --> P
     S --> P

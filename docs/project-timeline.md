@@ -27,7 +27,7 @@ Each week includes:
 |  **Goal** | Define project scope and requirements |
 |  **Tasks** | • Research existing smart water meters<br/>• Identify problem statement<br/>• Define system requirements<br/>• Study related literature (at least 10 papers)<br/>• Compare YF-S201 vs other flow sensors<br/>• Research XGBoost vs Random Forest for water data |
 |  **Deliverable** | Chapter 1: Introduction (Problem, Objectives, Scope) |
-|  **Risk** | Scope creep — keep focused on 1 inlet + 4 fixtures maximum |
+|  **Risk** | Scope creep — keep focused on 1 inlet + 3 fixtures maximum |
 
 ### Week 2: System Design
 
@@ -60,13 +60,13 @@ Each week includes:
 |  **Deliverable** | Working ESP32 + 1 flow sensor, Serial Monitor showing pulse counts |
 |  **Risk** | Common: wrong GPIO, missing pull-up resistor, charge-only USB cable |
 
-### Week 5: All 5 Sensors + Peripherals
+### Week 5: All 4 Sensors + Peripherals
 
 | Item | Activity |
 |------|----------|
-|  **Goal** | Wire all 5 sensors + buzzer + SD card |
-|  **Tasks** | • Wire sensors 2–5 to GPIO 35, 32, 33, 25<br/>• Add 10kΩ pull-ups to all sensor lines<br/>• Connect buzzer (GPIO 4)<br/>• Connect SD card module (SPI GPIO 18/19/23)<br/>• Verify all 5 sensors show readings |
-|  **Deliverable** | Breadboard with all 5 sensors showing live readings |
+|  **Goal** | Wire all 4 sensors + buzzer + SPIFFS |
+|  **Tasks** | • Wire sensors 2–4 to GPIO 35, 32, 33<br/>• Add 10kΩ pull-ups to all sensor lines<br/>• Connect buzzer (GPIO 4)<br/>• Verify all 4 sensors show readings |
+|  **Deliverable** | Breadboard with all 4 sensors showing live readings |
 |  **Risk** | GPIO 34 & 35 are input-only — external pull-up REQUIRED. GPIO 12 is boot pin — be careful. |
 
 ### Week 6: Firebase Integration
@@ -115,7 +115,7 @@ Each week includes:
 |------|----------|
 |  **Goal** | Complete data pipeline working: Sensor → ESP32 → Firebase → RPi → ML → Alert |
 |  **Tasks** | • Wire ML inference into Flask app<br/>• Test: simulate leak, verify ML detects it<br/>• Test: alert appears in web dashboard<br/>• Test: Telegram/email notification sent |
-|  **Deliverable** | Full system working end-to-end with all 5 sensors |
+|  **Deliverable** | Full system working end-to-end with all 4 sensors |
 |  **Risk** | Combine all components one at a time. Test each integration step before adding the next. |
 
 ---
@@ -126,9 +126,9 @@ Each week includes:
 
 | Item | Activity |
 |------|----------|
-|  **Goal** | Calibrate all 5 sensors and verify measurement accuracy |
+|  **Goal** | Calibrate all 4 sensors and verify measurement accuracy |
 |  **Tasks** | • Perform bucket test on each sensor (3× repeats)<br/>• Calculate average K-factor per sensor<br/>• Update firmware with calibrated PPL values<br/>• Verify: measure 10L, error should be < 3%<br/>• Log calibration results |
-|  **Deliverable** | All 5 sensors calibrated. Measurement error < 3%. Calibration log completed. |
+|  **Deliverable** | All 4 sensors calibrated. Measurement error < 3%. Calibration log completed. |
 |  **Risk** | Run at your actual operating flow rate. Low flow and high flow give different K-factors. |
 
 ### Week 12: Real-World Testing
@@ -187,7 +187,7 @@ Each week includes:
 | Week | Milestone | Status Indicator |
 |------|-----------|------------------|
 | 3 | 🟢 Parts received, tools installed | 🟢 |
-| 5 | 🟢 ESP32 reading all 5 sensors | 🟢 |
+| 5 | 🟢 ESP32 reading all 4 sensors | 🟢 |
 | 7 | 🟢 Local leak detection | 🟢 |
 | 8 | 🟢 Flask app live on RPi | 🟢 |
 | 10 | 🟢 End-to-end: Sensor → Firebase → ML → Alert | 🟢🟢 |
@@ -219,7 +219,7 @@ Each week includes:
 | **Not testing incrementally** | Test each component separately before integrating. Sensor → ESP32 → Firebase → RPi → ML. |
 | **Skipping calibration** | Uncalibrated sensors give ±10% error → ML detects leaks that aren't there or misses real ones. |
 | **Overcomplicated ML** | Start with simple rules + XGBoost. Don't try deep learning on ESP32. |
-| **No offline fallback** | ESP32 must work without internet. SD card logging + local leak rules. |
+| **No offline fallback** | ESP32 must work without internet. SPIFFS logging + local leak rules. |
 | **Bad demo day** | Record a video demo in advance. Have a backup ESP32. Test projector compatibility. |
 
 ---
@@ -229,15 +229,15 @@ Each week includes:
 | Item | ₱ (Estimated) |
 |------|--------------|
 | ESP32 + Expansion Board | ₱630 |
-| 5× YF-S201 Flow Sensors | ₱900 |
-| Check Valves + PVC Fittings | ₱730 |
+| 4× YF-S201 Flow Sensors | ₱720 |
+| Check Valves + PVC Fittings | ₱610 |
 | Buzzer + LEDs | ₱125 |
 | Breadboard + Jumpers + Resistors | ₱375 |
 | Enclosure + Hardware | ₱520 |
 | Power Supplies | ₱400 |
-| **Total Hardware** | **~₱4,280** |
+| **Total Hardware** | **~₱3,780** |
 | Raspberry Pi (4/5) | ₱2,500 |
-| **Grand Total** | **~₱6,780** |
+| **Grand Total** | **~₱6,280** |
 
 >  **Tip:** Request budget from department. Many schools have ₱5,000–₱10,000 capstone budget per group.
 

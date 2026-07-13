@@ -3,7 +3,7 @@
 > **Framework:** Arduino (ESP32 Core) via Arduino IDE  
 > **Firebase Client:** [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) v4.4+  
 > **Communication:** HTTPS + SSE Stream  
-> **Sensor Count:** 5 flow sensors (1 inlet + 4 fixtures)
+> **Sensor Count:** 4 flow sensors (1 inlet + 3 fixtures: bidet, kitchen, bathroom shower)
 
 ---
 
@@ -14,12 +14,12 @@ src/
 ├── water-meter.ino             # Main Arduino sketch (setup() + loop())
 ├── config.h                    # All configurable parameters
 ├── config.example.h            # Template (safe for git)
-├── sensor_manager.h            # Manages 5 sensor ISRs
+├── sensor_manager.h            # Manages 4 sensor ISRs
 ├── flow_sensor.h               # Single pulse counter class
 ├── firebase_client.h           # Firebase-ESP-Client wrapper
 ├── local_rules.h               # Local leak detection (non-ML fallback)
 ├── wifi_manager.h              # WiFi connect + reconnect
-├── data_logger.h               # SD card + SPIFFS logging
+├── data_logger.h               # SPIFFS logging
 ├── indicator_manager.h         # Buzzer + RGB LED alerts
 ├── ntp_sync.h                  # NTP time sync
 ├── ota_updater.h               # OTA firmware updates
@@ -32,7 +32,7 @@ src/
 
 ```cpp
 void loop() {
-    // 1. Read all 5 sensors (non-blocking)
+    // 1. Read all 4 sensors (non-blocking)
     sensorManager.readAll();
     
     // 2. Calculate flow metrics per fixture
@@ -117,7 +117,7 @@ void setupFirebase() {
 ### Uploading Reading Data
 
 ```cpp
-void uploadReading(SensorMetric metrics[5]) {
+void uploadReading(SensorMetric metrics[4]) {
     if (!Firebase.ready()) {
         Serial.println("Firebase not ready, skipping upload");
         return;
@@ -133,8 +133,8 @@ void uploadReading(SensorMetric metrics[5]) {
     json.set("inlet/total", metrics[0].total);
     json.set("inlet/pulse_count", metrics[0].pulseCount);
     
-    // Add fixture sensors (1–4)
-    for (int i = 1; i < 5; i++) {
+    // Add fixture sensors (1–3)
+    for (int i = 1; i < 4; i++) {
         String prefix = "fixture_" + String(i);
         json.set(prefix + "/flow_rate", metrics[i].flowRate);
         json.set(prefix + "/volume", metrics[i].volume);
@@ -151,7 +151,7 @@ void uploadReading(SensorMetric metrics[5]) {
         Serial.println("Data uploaded to Firebase");
     } else {
         Serial.println("Firebase upload failed: " + fbData.errorReason());
-        // Save to SD card as fallback
+        // Save to SPIFFS as fallback
         dataLogger.save(metrics);
     }
 }
@@ -188,10 +188,10 @@ void processStream() {
 
 ---
 
-## Sensor Manager (5 × Pulse Counter)
+## Sensor Manager (4 × Pulse Counter)
 
 ```cpp
-#define NUM_SENSORS 5
+#define NUM_SENSORS 4
 #define DEBOUNCE_MS 5
 
 struct SensorConfig {
@@ -203,10 +203,9 @@ struct SensorConfig {
 // Pin configuration
 SensorConfig sensors[NUM_SENSORS] = {
     {34, "inlet", "Main Inlet"},
-    {35, "fix1", "Kitchen Sink"},
-    {32, "fix2", "Toilet"},
-    {33, "fix3", "Wash Basin"},
-    {25, "fix4", "Shower"}
+    {35, "fix1", "Bidet"},
+    {32, "fix2", "Kitchen"},
+    {33, "fix3", "Bathroom Shower"}
 };
 
 // ISR-safe variables (volatile + IRAM)
@@ -255,7 +254,6 @@ readings/{device_id}/
       pulse_count: 405
     /fixture_2/   (same structure)
     /fixture_3/   (same structure)
-    /fixture_4/   (same structure)
     /rssi: -65
     /local_rules_status: 0
 
@@ -269,7 +267,7 @@ commands/{device_id}/
 alerts/{device_id}/
   /{alert_id}/
     fixture_id: 1
-    fixture_name: "Kitchen Sink"
+    fixture_name: "Bidet"
     alert_type: "minor_leak"
     confidence: 0.87
     flow_rate: 0.3
@@ -313,12 +311,11 @@ These run on the ESP32 when Firebase/ML is unreachable — less accurate but wor
 #define DEVICE_ID              "wm_001"
 
 // === Sensors ===
-#define NUM_SENSORS      5
+#define NUM_SENSORS      4
 #define PPL_INLET        450.0   // Calibrate per sensor — see calibration guide
 #define PPL_FIXTURE1     450.0
 #define PPL_FIXTURE2     450.0
 #define PPL_FIXTURE3     450.0
-#define PPL_FIXTURE4     450.0
 #define DEBOUNCE_MS      5       // Debounce in milliseconds
 
 // === Timing (milliseconds) ===
@@ -342,12 +339,10 @@ These run on the ESP32 when Firebase/ML is unreachable — less accurate but wor
    - Add: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
    - Tools -> Board -> Boards Manager -> search "ESP32" -> install "ESP32 Arduino"
 3. Select your board: **Tools -> Board -> ESP32 Arduino -> NodeMCU-32S**
-4. Select port: **Tools -> Port -> COMx** (check Windows Device Manager)
+4. Select port: **Tools -> Port -> COMx** (check Windows Device Manager for the COM port)
 5. Install libraries via Library Manager (Tools -> Manage Libraries):
    - `Firebase ESP Client` by mobizt
    - `ArduinoJson` by bblanchon
-   - `Adafruit SSD1306` by Adafruit (for any future display needs)
-   - `Adafruit GFX Library` by Adafruit
 
 ### Required Libraries
 

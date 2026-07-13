@@ -1,6 +1,6 @@
 # Bill of Materials (BOM) — Water Meter with Leak Detection
 
-> **System:** 1 inlet flow sensor + 4 fixture flow sensors → ESP32 → Firebase → RPi → XGBoost ML  
+> **System:** 1 inlet flow sensor + 3 fixture flow sensors → ESP32 → Firebase → RPi → XGBoost ML  
 > **Supplier Priority:** [Makerlab Electronics](https://shopee.ph/makerlabelectronics) → 4–5 alternatives  
 > **Prices:** Estimated in Philippine Peso (₱), July 2026
 
@@ -12,13 +12,13 @@
 |---|------|-----|----------|-----------|------|
 | 1 | **ESP32 38-Pin Dev Board** (NodeMCU-32S, CP2102, WiFi + BLE) | 1 | ₱450 | ₱450 | [Makerlab Shopee](https://shopee.ph/search?keyword=esp32%2038pin%20makerlab) |
 | 2 | **ESP32 38-Pin Expansion Board** (screw terminals, labeled) | 1 | ₱180 | ₱180 | [Makerlab Shopee](https://shopee.ph/search?keyword=esp32%20expansion%20board%20makerlab) |
-| 3 | **YF-S201 Water Flow Sensor** 1/2" thread, Hall-effect | **5** | ₱180 | **₱900** | [Makerlab Shopee](https://shopee.ph/search?keyword=yf-s201%20flow%20sensor%20makerlab) |
-| 4 | **Check Valve** 1/2" Brass / PVC (non-return) | 4 | ₱120 | ₱480 | [Makerlab Shopee](https://shopee.ph/search?keyword=check%20valve%201%2F2%20makerlab) |
+| 3 | **YF-S201 Water Flow Sensor** 1/2" thread, Hall-effect | **4** | ₱180 | **₱720** | [Makerlab Shopee](https://shopee.ph/search?keyword=yf-s201%20flow%20sensor%20makerlab) |
+| 4 | **Check Valve** 1/2" Brass / PVC (non-return) | 3 | ₱120 | ₱360 | [Makerlab Shopee](https://shopee.ph/search?keyword=check%20valve%201%2F2%20makerlab) |
 | 5 | **1/2" PVC Pipe Fittings** (tees, elbows, couplers, nipples) | 1 set | ₱250 | ₱250 | [Shopee Hardware](https://shopee.ph/search?keyword=1%2F2%20pvc%20pipe%20fitting%20set) |
 | 6 | **PTFE Thread Seal Tape** (Teflon, 10m roll) | 2 | ₱20 | ₱40 | [Makerlab Shopee](https://shopee.ph/search?keyword=teflon%20tape%20makerlab) |
 | 7 | **PVC Pipe Cement / Glue** (for permanent joints) | 1 | ₱80 | ₱80 | [Shopee Hardware](https://shopee.ph/search?keyword=pvc%20pipe%20cement) |
 
-**Core Subtotal:** **₱2,380**
+**Core Subtotal:** **₱2,080**
 
 ---
 
@@ -29,7 +29,7 @@
 | 8 | **Breadboard 830 Points** + 65 Jumper Wires | 1 set | ₱150 | ₱150 | [Makerlab Shopee](https://shopee.ph/search?keyword=breadboard%20jumper%20wires%20makerlab) |
 | 9 | **Jumper Wires M-M / M-F** (additional 40pc) | 1 | ₱65 | ₱65 | [Makerlab Shopee](https://shopee.ph/search?keyword=jumper%20wire%2040pcs%20makerlab) |
 | 10 | **Resistor Kit 1/4W** (assorted, 200pc) | 1 | ₱80 | ₱80 | [Makerlab Shopee](https://shopee.ph/search?keyword=resistor%20kit%20200pcs%20makerlab) |
-| 11 | **10kΩ Resistor** (pull-ups for 5 sensors, extra) | 10 | ₱2 | ₱20 | [Makerlab Shopee](https://shopee.ph/search?keyword=10k%20resistor%20makerlab) |
+| 11 | **10kΩ Resistor** (pull-ups for 4 sensors, extra) | 10 | ₱2 | ₱20 | [Makerlab Shopee](https://shopee.ph/search?keyword=10k%20resistor%20makerlab) |
 | 12 | **100nF Ceramic Capacitor** (decoupling per sensor) | 10 | ₱3 | ₱30 | [Makerlab Shopee](https://shopee.ph/search?keyword=ceramic%20capacitor%20makerlab) |
 | 13 | **Perf Board 7×9cm** (for permanent soldering) | 2 | ₱35 | ₱70 | [Makerlab Shopee](https://shopee.ph/search?keyword=perf%20board%20makerlab) |
 | 14 | **JST-XH Connector Kit** (2/3/4/5/6-pin assorted, with crimp pins & housing) | 1 set | ₱120 | ₱120 | [Makerlab Shopee](https://shopee.ph/search?keyword=jst-xh%20connector%20kit%20makerlab) |
@@ -120,9 +120,9 @@
 
 | Tier | Category | ₱ | Notes |
 |------|----------|---|-------|
-| **MVP** | Core + breadboard + power | **~₱2,285** | ESP32 + 1 sensor + buzzer (prove concept) |
-| **Standard** | All ESP32-side components + enclosure | **~₱4,955** | Full 5-sensor system |
-| **Complete** | Standard + Raspberry Pi (one-time) | **~₱7,455** | Production-ready with ML backend |
+| **MVP** | Core + breadboard + power | **~₱2,110** | ESP32 + 1 sensor + buzzer (prove concept) |
+| **Standard** | All ESP32-side components + enclosure | **~₱4,175** | Full 4-sensor system |
+| **Complete** | Standard + Raspberry Pi (one-time) | **~₱6,675** | Production-ready with ML backend |
 
 > **Note:** Raspberry Pi, touchscreen LCD, PSU, HDMI, and SD card are **already purchased** — excluded from cost totals above.
 

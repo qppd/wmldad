@@ -4,7 +4,7 @@
 
 Smart water monitoring system with **fixture-level leak detection** using **ESP32 → Firebase → RPi → XGBoost ML**.
 
-The system uses 1 inlet flow sensor to measure total consumption and 4 fixture flow sensors to monitor individual water outlets. Data flows from the ESP32 to Firebase Realtime DB via the [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) library (stream + regular calls). A **Raspberry Pi** backend consumes the Firebase data using **Pyrebase4**, runs **XGBoost** and **Isolation Forest** ML models, and serves a web dashboard on the 7" touchscreen LCD.
+The system uses 1 inlet flow sensor to measure total consumption and 3 fixture flow sensors to monitor individual water outlets (bidet, kitchen, bathroom shower). Data flows from the ESP32 to Firebase Realtime DB via the [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) library (stream + regular calls). A **Raspberry Pi** backend consumes the Firebase data using **Pyrebase4**, runs **XGBoost** and **Isolation Forest** ML models, and serves a web dashboard on the 7" touchscreen LCD.
 
 ---
 
@@ -24,25 +24,23 @@ graph TB
         D --> E1[Fixture 1 Sensor]
         D --> E2[Fixture 2 Sensor]
         D --> E3[Fixture 3 Sensor]
-        D --> E4[Fixture 4 Sensor]
         E1 --> CV1[Check Valve] --> F1[Fixture 1]
         E2 --> CV2[Check Valve] --> F2[Fixture 2]
         E3 --> CV3[Check Valve] --> F3[Fixture 3]
-        E4 --> CV4[Check Valve] --> F4[Fixture 4]
     end
 
     subgraph "ESP32 Edge Layer"
         direction TB
-        Sensors["5× Flow Sensor<br/>Pulse Counters<br/>(ISR + Debounce)"]
+        Sensors["4× Flow Sensor<br/>Pulse Counters<br/>(ISR + Debounce)"]
         Features["Feature Extractor<br/>flow_rate, volume,<br/>duration, time, ratio"]
         FirebaseClient["Firebase-ESP-Client<br/>Stream + Write"]
         LocalCtrl["Local Leak Rules"]
-        SDCard["SD Card Logger<br/>(Offline Backup)"]
+        SPIFFS["SPIFFS Logger<br/>(Offline Backup)"]
         
         Sensors --> Features
         Features --> FirebaseClient
         Features --> LocalCtrl
-        Sensors --> SDCard
+        Sensors --> SPIFFS
     end
 
     subgraph "Firebase Realtime DB"
@@ -80,7 +78,6 @@ graph TB
     E1 --> Sensors
     E2 --> Sensors
     E3 --> Sensors
-    E4 --> Sensors
     
     FirebaseClient --> Readings
     FirebaseClient --> Alerts
@@ -107,8 +104,8 @@ Step 1: SENSING
         Inlet Sensor (GPIO 34)  ─┐
         Fixture 1 Sensor (35)   ─┤  Every 1 second:
         Fixture 2 Sensor (32)   ─┤  → Read pulse count via ISR
-        Fixture 3 Sensor (33)   ─┤  → Debounce (5ms)
-        Fixture 4 Sensor (25)   ─┘  → Calculate flow rate & volume
+        Fixture 3 Sensor (33)   ─┘  → Debounce (5ms)
+                                    → Calculate flow rate & volume
 
 Step 2: LOCAL PROCESSING
         For each fixture:
@@ -163,5 +160,5 @@ Step 5: USER ACTION
 | **RPi over cloud hosting** | Local processing — no monthly fees, full control, no internet dependency for LAN dashboard |
 | **Isolation Forest + XGBoost** | XGBoost for known leak patterns, Isolation Forest for unknown anomalies |
 | **Check Valves per Fixture** | Prevents backflow contamination between fixtures |
-| **SD Card Backup** | Survives WiFi/Firebase outages — data never lost |
+| **SPIFFS Backup** | Survives WiFi/Firebase outages — data never lost |
 | **Port Forwarding + DDNS** | Remote access anywhere with internet; standard router feature |
