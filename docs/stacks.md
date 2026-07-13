@@ -79,7 +79,7 @@ void setupFirebase() {
 |-------|------------|---------|---------|
 | **Hardware** | Raspberry Pi 3B+/4/5 | — | Local always-on Flask server, ML inference |
 | **OS** | Raspberry Pi OS (64-bit) | Bookworm | Stable Linux distribution for ARM |
-| **Language** | Python | ≥ 3.9 | ML ecosystem, Firebase SDK |
+| **Language** | Python | ≥ 3.11 | ML ecosystem, Firebase SDK |
 | **Web Framework** | Flask | ≥ 2.x | Web dashboard + REST API endpoints |
 | **Firebase Client** | [Pyrebase4](https://github.com/nhorvath/Pyrebase4) | ≥ 4.5 | Firebase Realtime DB read/write via Email/Password auth |
 | **ML (primary)** | [XGBoost](https://xgboost.readthedocs.io/) | ≥ 2.0 | Gradient-boosted decision tree — leak classification |
@@ -158,11 +158,10 @@ void setupFirebase() {
 | Tool | Purpose |
 |------|---------|
 | **Arduino IDE** | Build, upload, and debug ESP32 firmware (C++) |
-| **Python 3.9+** | ML training, backend development |
+| **Python 3.11+** | ML training, backend development |
 | **Jupyter / Google Colab** | ML model prototyping and experimentation |
 | **Firebase Console** | Database management, rules, authentication |
 | **RPi console (ssh)** | Backend debugging, log viewing |
-| **Postman** | API testing |
 | **Serial Monitor** | ESP32 debug output |
 | **Git + GitHub** | Version control |
 
