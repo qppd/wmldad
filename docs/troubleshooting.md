@@ -11,7 +11,7 @@
 | Cause | Check | Fix |
 |-------|-------|-----|
 | USB cable is charge-only | Try a known good data cable | Use cable rated for data transfer |
-| Wrong USB port | Try a different port | Use USB 2.0 or 3.0 port directly on computer |
+| Wrong USB port | Device Manager → Ports | Use USB 2.0 or 3.0 port directly on computer |
 | ESP32 damaged | Check 3.3V pin with multimeter | Replace ESP32 |
 | Expansion board short | Check for solder bridges | Remove expansion board, test ESP32 alone |
 
@@ -112,7 +112,7 @@ Normal: balance < 10% of inlet
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| "Firebase not ready" | Auth not complete | Check Firebase.begin() response |
+| "Firebase not ready" | Auth not complete | Check `Firebase.begin()` response |
 | "401 Unauthorized" | Wrong API key or email/password | Verify in Firebase Console |
 | "Firebase database URL is not set" | Missing URL in config | Copy from Firebase Console → Realtime DB |
 | "Connection timed out" | Network issue | Check WiFi, try pinging database URL |
@@ -135,7 +135,7 @@ Normal: balance < 10% of inlet
 ## 5. ML Model Issues
 
 | Problem | Cause | Fix |
-|---------|-------|------|
+|---------|-------|-----|
 | All predictions are "normal" | Model not trained / loaded | Check model file exists |
 | Too many false positives | Threshold too low | Increase `confidence_threshold` to 0.85 |
 | Misses all leaks | Training data doesn't include leaks | Add leak samples, retrain |
@@ -169,7 +169,7 @@ print(result)
 | **App not loading** | Check Flask output: `journalctl -u water-meter.service -f` |
 | **"Internal Server Error"** | View Flask error log: `sudo journalctl -u water-meter.service --since "5 min ago"` |
 | **Module not found** | Activate venv → `pip install -r requirements.txt` |
-| **Memory error** | RPi 4 has 2-8GB RAM — check `free -h`. Reduce n_estimators in XGBoost if needed. |
+| **Memory error** | RPi 4 has 2-8GB RAM — check `free -h`. Reduce `n_estimators` in XGBoost if needed. |
 | **RPi not reachable** | Check network: `ping <rpi-ip>`. Ensure port 5000 is not blocked by firewall |
 | **RPi auto-start not working** | Check systemd: `sudo systemctl status water-meter.service` |
 | **SD card corruption** | Use a UPS and `sudo raspi-config` → Performance → Overlay File System for read-only root |
@@ -179,12 +179,10 @@ print(result)
 ## 7. Plumbing / Mechanical Issues
 
 | Problem | Cause | Fix |
-|---------|-------|------|
+|---------|-------|-----|
 | Water hammer | Fast valve closing | Install water hammer arrestor |
 | Sensor not spinning | Debris in turbine | Remove and clean with soft brush |
 | Check valve stuck | Debris or hard water | Disassemble and clean |
-| Solenoid valve buzzing | Low voltage | Check 12V supply, increase wire gauge |
-| Valve won't close | Relay not activating | Check GPIO pin, test relay manually |
 
 ---
 
@@ -203,7 +201,6 @@ print(result)
 | `format` | Format SPIFFS storage | Clear corrupted data |
 | `heap` | Free heap memory | Check for memory leaks |
 | `uptime` | Device uptime in seconds | Know when last rebooted |
-| `valves` | Current valve states | Debug relay issues |
 
 ---
 
@@ -220,6 +217,8 @@ print(result)
 | Blink white (3x + pause) | Successful data upload |
 | Blink red (5x + pause) | Upload failed / Firebase error |
 | Off | Deep sleep or no power |
+
+---
 
 ## 10. Checklist Before Panicking
 

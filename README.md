@@ -10,7 +10,7 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 
 ### How It Works
 
-```
+```text
 |[Inlet Flow Sensor] ─┐
 |[Fixture 1 Sensor] ──┤
 |[Fixture 2 Sensor] ──┤──→ ESP32 → Firebase Realtime DB → RPi (Flask + ML)
@@ -28,14 +28,13 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 -  **RPi Backend** — Flask + Firebase Admin SDK + XGBoost
 -  **Check Valves** — prevent backflow between fixtures
 -  **Web Dashboard** — real-time monitoring via RPi Flask dashboard
--  **Solenoid Valve Control** — automatic shutoff on leak detection
 -  **Local Data Logging** — SD card backup when offline
 
 ---
 
 ##  System Architecture
 
-```
+```text
 ┌──────────────────────────────────────────────────────────────────┐
 │                      PLUMBING LAYER                              │
 │  Supply → Inlet Sensor → Check Valve → Junction → Fixture 1-4   │
@@ -49,7 +48,6 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 │  • Local Feature Extraction (flow rate, volume, duration)         │
 │  • Firebase-ESP-Client → Firebase Realtime DB (stream + write)    │
 │  • OLED Display (live readings per fixture)                       │
-│  • Relay Control (5× solenoid valves for shutoff)                 │
 │  • SD Card Logger (offline backup)                                │
 └──────────────────────────────────────────────────────────────────┘
                                ↓ (HTTPS/SSE stream)
@@ -58,7 +56,6 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 │   Firebase Realtime Database                                    │
 │     - /readings/{device_id}/{timestamp} → raw sensor data        │
 │     - /alerts/{alert_id} → leak events                           │
-│     - /commands/{device_id} → valve control from dashboard       │
 │     - /models/{version} → ML model metadata                      │
 └──────────────────────────────────────────────────────────────────┘
                                ↓ (Firebase Admin SDK polling)
@@ -99,7 +96,7 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 
 **Primary:** [XGBoost](./docs/ml-model.md) — gradient-boosted decision trees
 - 9 input features (flow rate, duration, time patterns, fixture ID, etc.)
-- 4 output classes: `normal`, `minor_leak`, `major_leak`, `anomaly`
+- 3 output classes: `normal`, `minor_leak`, `major_leak`
 - Accuracy target: ≥ 95%
 - Trained on RPi, served via Flask API
 
@@ -113,8 +110,8 @@ A complete IoT system that monitors water consumption across multiple fixtures i
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/qppd/water-meter.git
-cd water-meter
+git clone https://github.com/qppd/wmldad.git
+cd wmldad
 
 # 2. Set up Firebase
 #    - Create a Firebase project
@@ -162,8 +159,8 @@ See [Setup Guide](./docs/setup.md) for complete step-by-step instructions.
 
 ##  Project Structure
 
-```
-water-meter/
+```text
+wmldad/
 ├── docs/                     # Complete documentation (14 files)
 │   ├── system-architecture.md
 │   ├── flowchart.md
@@ -185,12 +182,12 @@ water-meter/
 │   ├── flow_sensor.h            # Pulse counter class
 │   ├── firebase_client.h        # Firebase-ESP-Client wrapper
 │   ├── local_rules.h            # Offline leak detection
-│   ├── valve_controller.h       # Relay/solenoid control
 │   ├── wifi_manager.h           # WiFi connect + reconnect
 │   ├── data_logger.h            # SD card + SPIFFS logging
 │   ├── display_manager.h        # OLED 128x64
 │   ├── alert_manager.h          # Buzzer + LED alerts
 │   ├── ntp_sync.h               # NTP time sync
+│   ├── ota_updater.h            # OTA firmware updates
 │   └── led_indicator.h          # Status LED patterns
 ├── rpi/                  # RPi backend (Flask + ML)
 │   ├── app.py                # Flask web app
@@ -228,4 +225,4 @@ MIT
 
 ## ‍ Author
 
-[qppd](https://github.com/qppd) — Quezon Province, Philippines 
+[qppd](https://github.com/qppd) — Quezon Province, Philippines

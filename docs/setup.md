@@ -1,7 +1,7 @@
 # Setup Guide — Step-by-Step from Zero to Working System
 
-> **Target audience:** Students / researchers building a capstone project
-> **Estimated time:** 2–3 weeks (part-time)
+> **Target audience:** Students / researchers building a capstone project  
+> **Estimated time:** 2–3 weeks (part-time)  
 > **Prerequisites:** Basic electronics (solderless breadboard), basic programming
 
 ---
@@ -32,6 +32,7 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 | ESP32 38-pin Dev Board | 1 | ₱450 |
 | ESP32 38-pin Expansion Board | 1 | ₱180 |
 | YF-S201 Flow Sensor | 5 | ₱900 |
+| Check Valve 1/2" | 4 | ₱480 |
 | Breadboard + Jumper Wires | 1 set | ₱150 |
 | USB Micro Data Cable | 1 | ₱100 |
 | 5V 2A USB Power Adapter | 1 | ₱150 |
@@ -88,9 +89,8 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 
 ```bash
 # Open terminal (Command Prompt or Git Bash)
-git clone https://github.com/qppd/water-meter.git
-cd water-meter
-
+git clone https://github.com/qppd/wmldad.git
+cd wmldad
 ```
 
 ### Step 2.4: Install Python Dependencies (for ML Backend)
@@ -191,8 +191,8 @@ Once the test circuit works, connect all sensors:
 
 | Sensor | GPIO | Pull-up (10kΩ to 3.3V) |
 |--------|------|------------------------|
-| Inlet | 34 |  Required (input-only pin) |
-| Fixture 1 | 35 |  Required (input-only pin) |
+| Inlet | 34 | Required (input-only pin) |
+| Fixture 1 | 35 | Required (input-only pin) |
 | Fixture 2 | 32 | Recommended |
 | Fixture 3 | 33 | Recommended |
 | Fixture 4 | 25 | Recommended |
@@ -210,14 +210,11 @@ Buzzer (Active):
   Positive → GPIO 4
   Negative → GND (via 100Ω resistor optional)
 
-Relay Module (for solenoid valves):
-  VCC → 5V
-  GND → GND
-  IN1 → GPIO 26 (Inlet valve)
-  IN2 → GPIO 27 (Fixture 1 valve)
-  IN3 → GPIO 14 (Fixture 2 valve)
-  IN4 → GPIO 12 (Fixture 3 valve — boot pin!)
-  IN5 → GPIO 13 (Fixture 4 valve — if 5-ch relay)
+RGB LED (optional):
+  Red → GPIO 5 (via driver)
+  Green → GPIO 18 (via driver)
+  Blue → GPIO 19 (via driver)
+  Common → GND
 ```
 
 ### Step 4.5: Plumbing Setup
@@ -327,8 +324,8 @@ For testing without actual plumbing:
 2. **SSH into the RPi** or connect a monitor/keyboard
 3. **Clone the project:**
    ```bash
-   git clone https://github.com/qppd/water-meter.git
-   cd water-meter/rpi/
+   git clone https://github.com/qppd/wmldad.git
+   cd wmldad/rpi/
    ```
 4. **Create virtual environment:**
    ```bash
@@ -420,18 +417,17 @@ cp training/scaler.pkl rpi/models/
 3. Check if an alert appears on the dashboard
 4. Check Firebase `/alerts/` path
 
-### Test 4: Remote Valve Control
+### Test 4: Command Flow
 
 1. In Firebase Console, write to `/commands/wm_001/cmd_test`:
    ```json
    {
-     "command": "close_fix1",
+     "command": "calibrate",
      "source": "test"
    }
    ```
-2. ESP32 should respond by activating the relay
-3. (If solenoid valve installed) Valve should close
-4. Valve state should update on the OLED display
+2. ESP32 should respond by entering calibration mode
+3. OLED should show calibration status
 
 ### Test 5: Offline Mode
 

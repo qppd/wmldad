@@ -35,13 +35,15 @@ flowchart TD
     R --> P
     S --> P
     
-    P -->|Yes| T[Execute Command<br/>→ Valve Open/Close]
+    P -->|Yes| T[Execute Command<br/>→ Valve Action / Calibration]
     P -->|No| I
     
     T --> I
 ```
 
 </details>
+
+---
 
 ## 2. Firebase Data Flow (ESP32 → Firebase → RPi)
 
@@ -57,40 +59,41 @@ flowchart LR
         B --> C[Firebase.pushJSON<br/>→ /readings/{id}/{ts}]
         D[Firebase.stream<br/>← /commands/{id}]
         D --> E{New Command?}
-        E -->|close valve| F[Set Relay LOW]
-        E -->|open valve| G[Set Relay HIGH]
         E -->|calibrate| H[Enter Calibration Mode]
+        E -->|reboot| I[Reboot ESP32]
     end
     
     subgraph "Firebase Realtime DB"
-        C --> I[(/readings)]
-        J[(/commands)] --> D
-        K[(/alerts)] --> L
-        M[(/models)] --> N
+        C --> J[(/readings)]
+        K[(/commands)] --> D
+        L[(/alerts)] --> M
+        N[(/models)] --> O
     end
     
     subgraph "RPi (Firebase Admin SDK)"
-        O[Firebase Admin SDK<br/>Poll Listener] --> I
-        O --> P[Extract Features]
-        P --> Q[XGBoost Inference]
-        P --> R[Isolation Forest<br/>Anomaly Score]
-        Q --> S{Leak?}
-        R --> S
-        S -->|Yes| T[Write Alert<br/>→ /alerts/{id}]
-        T --> K
-        S -->|No| U[Log Normal Reading]
-        T --> V[Send Notification<br/>Telegram / Email]
+        P[Firebase Admin SDK<br/>Poll Listener] --> J
+        P --> Q[Extract Features]
+        Q --> R[XGBoost Inference]
+        Q --> S[Isolation Forest<br/>Anomaly Score]
+        R --> T{Leak?}
+        S --> T
+        T -->|Yes| U[Write Alert<br/>→ /alerts/{id}]
+        U --> L
+        T -->|No| V[Log Normal Reading]
+        U --> W[Send Notification<br/>Telegram / Email]
     end
     
     subgraph "User"
-        W[Web Dashboard] --> M
-        W --> I
-        X[Telegram Alert] --> V
-        Y[User Command] --> J
+        X[Web Dashboard] --> N
+        X --> J
+        Y[Telegram Alert] --> W
+        Z[User Command] --> K
     end
 ```
 
 </details>
+
+---
 
 ## 3. Pulse Interrupt Flow (ESP32 ISR)
 
@@ -113,6 +116,8 @@ flowchart TD
 
 </details>
 
+---
+
 ## 4. Feature Extraction Flow (RPi Backend)
 
 > Mermaid-based diagram (SVG export removed; source below)
@@ -134,8 +139,7 @@ flowchart TD
     D --> D6["inlet_to_fixture_ratio"]
     D --> D7["rate_variance (10s window)"]
     D --> D8["is_night_time"]
-    D --> D9["rolling_avg_1min"]
-    D --> D10["pulse_trend (slope)"]
+    D --> D9["pulse_trend (slope)"]
     
     D1 --> E[Feature Vector<br/>(9–12 features)]
     D2 --> E
@@ -146,13 +150,14 @@ flowchart TD
     D7 --> E
     D8 --> E
     D9 --> E
-    D10 --> E
     
     E --> F[Scale / Normalize]
     F --> G[← XGBoost + Isolation Forest]
 ```
 
 </details>
+
+---
 
 ## 5. XGBoost ML Inference Flow
 
@@ -187,12 +192,14 @@ flowchart TD
     P --> Q
     
     Q --> R[Send Telegram Alert]
-    Q --> S[Write Valve Command<br/>→ /commands/{id}]
+    Q --> S[Write Command<br/>→ /commands/{id}]
 ```
 
 </details>
 
-## 6. Valve Control Flow (ESP32)
+---
+
+## 6. Command Execution Flow (ESP32)
 
 > Mermaid-based diagram (SVG export removed; source below)
 
@@ -203,28 +210,18 @@ flowchart TD
 flowchart TD
     A[Firebase Stream Event<br/>← /commands/{device_id}] --> B{Command Type?}
     
-    B -->|close_inlet| C[Set Relay 1 LOW<br/>→ Close Inlet Valve]
-    B -->|close_fix1| D[Set Relay 2 LOW<br/>→ Close Fixture 1]
-    B -->|close_fix2| E[Set Relay 3 LOW<br/>→ Close Fixture 2]
-    B -->|close_fix3| F[Set Relay 4 LOW<br/>→ Close Fixture 3]
-    B -->|close_fix4| G[Set Relay 5 LOW<br/>→ Close Fixture 4]
-    B -->|open_*| H[Set Corresponding<br/>Relay HIGH]
-    B -->|close_all| I[Close All Valves]
     B -->|calibrate| J[Start Calibration<br/>Routine]
+    B -->|reboot| I[Reboot ESP32]
     
-    C --> K[Update OLED<br/>+ LED Status]
-    D --> K
-    E --> K
-    F --> K
-    G --> K
-    H --> K
+    J --> K[Update OLED<br/>+ LED Status]
     I --> K
-    J --> K
     
     K --> L[Acknowledge to Firebase<br/>→ valve_state_updated]
 ```
 
 </details>
+
+---
 
 ## 7. Local Leak Rules (ESP32 Fallback — No ML)
 
@@ -257,6 +254,8 @@ flowchart TD
 
 </details>
 
+---
+
 ## 8. Data Flow Diagram (Full System)
 
 > Mermaid-based diagram (SVG export removed; source below)
@@ -279,7 +278,7 @@ flowchart LR
     J --> K[ Telegram<br/>Notification]:::user
     F --> L[ Web<br/>Dashboard]:::user
     F --> M[ ESP32<br/>Command Stream]:::firmware
-    M --> N[ Valve<br/>Controller]:::firmware
+    M --> N[ Command<br/>Handler]:::firmware
     
     classDef physical fill:#e1f5fe,stroke:#0288d1
     classDef firmware fill:#fff3e0,stroke:#f57c00

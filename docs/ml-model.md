@@ -60,6 +60,9 @@ from datetime import datetime
 rate_buffer = {i: deque(maxlen=10) for i in range(5)}
 pulse_buffer = {i: deque(maxlen=5) for i in range(5)}
 
+# Track flow start times
+flow_start_time = {i: None for i in range(5)}
+
 def extract_features(data, sensor_id, fixture_count=5):
     """Extract 9 features from Firebase reading data."""
     
@@ -122,9 +125,10 @@ def extract_features(data, sensor_id, fixture_count=5):
 ### Training Notebook (Google Colab / Jupyter)
 
 The complete training pipeline is in `training/water_meter_ml_training.ipynb`.
+
 Open this notebook in Google Colab or local Jupyter Notebook:
 
-1. **Google Colab (recommended):** Upload the notebook to Google Drive, open with Colab, enable GPU runtime (Runtime -> Change runtime type -> T4 GPU)
+1. **Google Colab (recommended):** Upload the notebook to Google Drive, open with Colab, enable GPU runtime (Runtime → Change runtime type → T4 GPU)
 2. **Jupyter Notebook (local):** `cd training/ && pip install -r requirements.txt && jupyter notebook water_meter_ml_training.ipynb`
 
 ### Key Training Cells
@@ -185,7 +189,7 @@ def train_xgboost(features_csv='training_data.csv'):
     
     # Evaluate
     y_pred = model.predict(X_val)
-    print(classification_report(y_val, y_pred, 
+    print(classification_report(y_val, y_pred,
           target_names=['normal', 'minor_leak', 'major_leak']))
     
     # Save model + scaler
@@ -332,17 +336,17 @@ def generate_training_data(n_samples=100000):
             # Lower flow at night
             if is_night:
                 flow_rate *= 0.3
-                
+               
             # Shorter duration for faucets, longer for showers
             if fixture_id == 2:  # Toilet
                 duration = np.random.normal(60, 10)
                 flow_rate = np.random.normal(8, 2)
-            
+        
         elif label == 'minor_leak':
             # Slow continuous leak
             flow_rate = np.random.uniform(0.1, 0.5)
             duration = np.random.exponential(1800) + 600  # 10+ minutes
-            
+        
         elif label == 'major_leak':
             # High continuous flow
             flow_rate = np.random.uniform(8, 25)
@@ -387,6 +391,7 @@ def generate_training_data(n_samples=100000):
 ## Model Retraining Pipeline
 
 Models are retrained in **Google Colab or Jupyter Notebook** using `training/water_meter_ml_training.ipynb`.
+
 After retraining, copy the model files to the RPi.
 
 ```python

@@ -1,8 +1,8 @@
 # Firmware Architecture — ESP32 with Firebase-ESP-Client
 
-> **Framework:** Arduino (ESP32 Core) via Arduino IDE
-> **Firebase Client:** [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) v4.4+
-> **Communication:** HTTPS + SSE Stream
+> **Framework:** Arduino (ESP32 Core) via Arduino IDE  
+> **Firebase Client:** [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) v4.4+  
+> **Communication:** HTTPS + SSE Stream  
 > **Sensor Count:** 5 flow sensors (1 inlet + 4 fixtures)
 
 ---
@@ -18,7 +18,6 @@ src/
 ├── flow_sensor.h               # Single pulse counter class
 ├── firebase_client.h           # Firebase-ESP-Client wrapper
 ├── local_rules.h               # Local leak detection (non-ML fallback)
-├── valve_controller.h          # Relay control for 5 valves
 ├── wifi_manager.h              # WiFi connect + reconnect
 ├── data_logger.h               # SD card + SPIFFS logging
 ├── display_manager.h           # OLED 128×64
@@ -26,7 +25,6 @@ src/
 ├── ntp_sync.h                  # NTP time sync
 ├── ota_updater.h               # OTA firmware updates
 └── led_indicator.h             # Status LED patterns
-
 ```
 
 ---
@@ -52,7 +50,7 @@ void loop() {
     LeakStatus ls = localRules.check(metrics);
     if (ls != LEAK_NONE) {
         alertManager.activate(ls);
-        valveController.close(ls.fixture_index);
+        // Note: Valve control removed - check valves prevent backflow
     }
     
     // 5. Check Firebase stream for commands
@@ -177,26 +175,12 @@ void processStream() {
         // Parse command from path
         if (path.startsWith("/" + String(DEVICE_ID))) {
             // Extract command
-            if (value == "close_all") {
-                valveController.closeAll();
-            } else if (value == "close_inlet") {
-                valveController.close(0);
-            } else if (value == "close_fix1") {
-                valveController.close(1);
-            } else if (value == "close_fix2") {
-                valveController.close(2);
-            } else if (value == "close_fix3") {
-                valveController.close(3);
-            } else if (value == "close_fix4") {
-                valveController.close(4);
-            } else if (value == "open_all") {
-                valveController.openAll();
-            } else if (value.startsWith("open_")) {
-                // open_0, open_1, etc.
-                int idx = value.substring(5).toInt();
-                valveController.open(idx);
+            if (value == "calibrate") {
+                sensorManager.startCalibration(0);
             } else if (value == "calibrate_inlet") {
                 sensorManager.startCalibration(0);
+            } else if (value == "reboot") {
+                ESP.restart();
             }
         }
     }
@@ -258,7 +242,7 @@ void SensorManager::begin() {
 ## Firebase Data Structure
 
 ```
-/readings/{device_id}/
+readings/{device_id}/
   /{ISO_timestamp}/
     /inlet/
       flow_rate: 12.5
@@ -276,14 +260,14 @@ void SensorManager::begin() {
     /rssi: -65
     /local_rules_status: 0
 
-/commands/{device_id}/
+commands/{device_id}/
   /{command_id}/
-    command: "close_fix1"
+    command: "calibrate"
     timestamp: "2026-07-10T12:00:00Z"
     source: "dashboard"
     executed: false
 
-/alerts/{device_id}/
+alerts/{device_id}/
   /{alert_id}/
     fixture_id: 1
     fixture_name: "Kitchen Sink"
@@ -291,7 +275,8 @@ void SensorManager::begin() {
     confidence: 0.87
     flow_rate: 0.3
     duration: 300
-    valve_action: "closed"
+    valve_action: "monitoring"
+    valve_state: "open"
     timestamp: "2026-07-10T12:05:00Z"
     resolved: false
 ```
@@ -302,7 +287,7 @@ void SensorManager::begin() {
 
 ## Local Leak Rules (ESP32 Fallback)
 
-These run on the ESP32 when Firebase/ML is unreachable — they're less accurate but work offline:
+These run on the ESP32 when Firebase/ML is unreachable — less accurate but work offline:
 
 | Rule | Condition | Action |
 |------|-----------|--------|
@@ -340,10 +325,6 @@ These run on the ESP32 when Firebase/ML is unreachable — they're less accurate
 // === Timing (milliseconds) ===
 #define READ_INTERVAL_MS     1000    // Read sensors every 1 second
 #define UPLOAD_INTERVAL_MS   5000    // Upload to Firebase every 5 seconds
-
-// === Valve Control ===
-#define RELAY_PINS   {26, 27, 14, 12, 13}
-#define VALVE_CLOSE_STATE  LOW    // Relay active LOW = valve closed
 
 // === Local Rules ===
 #define LEAK_CONFIRM_COUNT  3      // Consecutive readings to confirm minor leak

@@ -63,7 +63,7 @@ Actual PPL = 2,320 ÷ 5 = 464 PPL
 **Step 6:** Repeat 3 times and average:
 ```
 Test 1: 2,320 pulses ÷ 5L = 464 PPL
-Test 2: 2,310 pulses ÷ 5L = 462 PPL  
+Test 2: 2,310 pulses ÷ 5L = 462 PPL 
 Test 3: 2,340 pulses ÷ 5L = 468 PPL
 
 Average PPL = (464 + 462 + 468) ÷ 3 = 464.7 → round to 465
@@ -109,10 +109,10 @@ After calibration, verify accuracy:
 
 | Accuracy | Error Range | Impact on Leak Detection |
 |----------|-------------|-------------------------|
-|  Excellent | < ±2% | Reliable leak detection |
-|  Good | ±2% – ±5% | Minor false positive risk |
-|  Acceptable | ±5% – ±10% | May miss small leaks |
-|  Needs work | > ±10% | Unreliable for leak detection |
+| Excellent | < ±2% | Reliable leak detection |
+| Good | ±2% – ±5% | Minor false positive risk |
+| Acceptable | ±5% – ±10% | May miss small leaks |
+| Needs work | > ±10% | Unreliable for leak detection |
 
 **Formula:**
 ```

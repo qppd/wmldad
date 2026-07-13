@@ -69,14 +69,6 @@ block-beta
     
     space:7
     
-    block:actuators:7
-        columns 7
-        Relay["4-Ch Relay<br/>Module<br/>GPIO 26/27/14/12/13"]:3
-        SV["Solenoid Valves<br/>×4 (or ×5)"]:4
-    end
-    
-    space:7
-    
     block:cloud:7
         columns 7
         Firebase[" Firebase<br/>Realtime DB"]:3
@@ -88,9 +80,6 @@ block-beta
     F2 --> P32
     F3 --> P33
     F4 --> P25
-    
-    MCU --> Relay
-    Relay --> SV
     
     MCU --> Firebase
     Firebase --> RPi
@@ -109,11 +98,6 @@ block-beta
 | **Flow Sensor 3 — Fixture 2** | GPIO 32 | Screw terminal 3 | Use 10kΩ pull-up to 3.3V |
 | **Flow Sensor 4 — Fixture 3** | GPIO 33 | Screw terminal 4 | Use 10kΩ pull-up to 3.3V |
 | **Flow Sensor 5 — Fixture 4** | GPIO 25 | Screw terminal 5 | Use 10kΩ pull-up to 3.3V |
-| **Relay 1 — Inlet Valve** | GPIO 26 | Screw terminal 6 | Active LOW |
-| **Relay 2 — Fixture 1 Valve** | GPIO 27 | Screw terminal 7 | Active LOW |
-| **Relay 3 — Fixture 2 Valve** | GPIO 14 | Screw terminal 8 | Active LOW |
-| **Relay 4 — Fixture 3 Valve** | GPIO 12 | Screw terminal 9 |  **Boot pin** — use pull-down resistor |
-| **Relay 5 — Fixture 4 Valve** | GPIO 13 | Screw terminal 10 | Active LOW |
 | **OLED SDA** | GPIO 21 | I²C header | Connect to OLED SDA |
 | **OLED SCL** | GPIO 22 | I²C header | Connect to OLED SCL |
 | **Buzzer** | GPIO 4 | GPIO header | Active buzzer (+ leg to GPIO, - to GND) |
@@ -133,26 +117,29 @@ block-beta
 ```
 ESP32 38-Pin Expansion Board
 ┌─────────────────────────────────────────────────────┐
-│  [34]──10kΩ─┬── YF-S201 Outlet (Yellow)            │
-│  [35]──10kΩ─┬── YF-S201 Fixture 1 (Yellow)         │
-│  [32]──10kΩ─┬── YF-S201 Fixture 2 (Yellow)         │
-│  [33]──10kΩ─┬── YF-S201 Fixture 3 (Yellow)         │
-│  [25]──10kΩ─┬── YF-S201 Fixture 4 (Yellow)         │
-│                                                     │
-│  [26] ──────┬── Relay Module IN1                    │
-│  [27] ──────┬── Relay Module IN2                    │
-│  [14] ──────┬── Relay Module IN3                    │
-│  [12] ──────┬── Relay Module IN4                    │
-│  [13] ──────┬── Relay Module IN5 (if 5-ch)          │
+│  [34]──10kΩ─┬── YF-S201 Inlet (Yellow)              │
+│  [35]──10kΩ─┬── YF-S201 Fixture 1 (Yellow)          │
+│  [32]──10kΩ─┬── YF-S201 Fixture 2 (Yellow)          │
+│  [33]──10kΩ─┬── YF-S201 Fixture 3 (Yellow)          │
+│  [25]──10kΩ─┬── YF-S201 Fixture 4 (Yellow)          │
 │                                                     │
 │  [21] ──────┬── OLED SDA                            │
 │  [22] ──────┬── OLED SCL                            │
 │                                                     │
-│  5V  ──────┬── Relay Module VCC                     │
+│  [4]  ──────┬── Buzzer (+)                          │
+│  [2]  ──────┬── Built-in LED                        │
+│  [5]  ──────┬── RGB LED (via driver)                │
+│                                                     │
+│  [15] ──────┬── SD Card CS                          │
+│  [23] ──────┬── SD Card MOSI                        │
+│  [19] ──────┬── SD Card MISO                        │
+│  [18] ──────┬── SD Card SCK                         │
+│                                                     │
 │  5V  ──────┬── YF-S201 VCC (Red wires)             │
 │  GND ──────┬── All sensor GND (Black wires)        │
-│  GND ──────┬── Relay Module GND                     │
-│  GND ──────┬── OLED GND                             │
+│  GND ──────┬── OLED GND                            │
+│  GND ──────┬── Buzzer GND                          │
+│  GND ──────┬── RGB LED GND                         │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -193,26 +180,22 @@ block-beta
     
     ESPV["ESP32 VIN<br/>(5V)"]:1
     
-    RelayV["Relay Module<br/>VCC (5V)"]:1
-    
     SensorV["Flow Sensors<br/>VCC (5V)"]:1
     
     OLEDV["OLED/SD<br/>3.3V (regulator)"]:1
     
-    Valves12["Solenoid Valves<br/>12V (separate PSU)"]:1
-    
     AC --> PSU
     PSU --> ESPV
-    PSU --> RelayV
     PSU --> SensorV
     PSU --> OLEDV
     
     AC --> Valves12
+    Valves12["(Not used in<br/>current config)"]:1
 ```
 
 </details>
 
-> **Note:** Solenoid valves typically require 12V / 1A minimum. Use a separate 12V power supply if including automatic shutoff valves. Do NOT power valves from the ESP32 5V rail.
+> **Note:** The 12V solenoid valve power supply and LM2596 step-down regulator have been removed from this configuration. Check valves provide backflow prevention; automatic shutoff via solenoid valves is not included in this version.
 
 ---
 
@@ -231,8 +214,6 @@ block-beta
         columns 4
         
         ESP32Board["ESP32 +<br/>Expansion Board"]:1
-        
-        RelayBoard["4-Ch Relay<br/>Module"]:1
         
         SDCardM["SD Card<br/>Module"]:1
         
@@ -269,7 +250,7 @@ block-beta
             GPIO13─┤13          26├── GPIO0 (BOOT)
               GND ─┤14          25├── GPIO2 (LED)
             GPIO15─┤15          24├── GPIO15
-            ───────┤16          23├── GPIO13
+            ───────┤16          23├── ───────
               3.3V ─┤17          22├── ───────
               5V  ─┤18          21├── ───────
               GND ─┤19          20├── ───────

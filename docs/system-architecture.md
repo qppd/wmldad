@@ -36,7 +36,7 @@ graph TB
         Sensors["5× Flow Sensor<br/>Pulse Counters<br/>(ISR + Debounce)"]
         Features["Feature Extractor<br/>flow_rate, volume,<br/>duration, time, ratio"]
         FirebaseClient["Firebase-ESP-Client<br/>Stream + Write"]
-        LocalCtrl["Local Leak Rules<br/>Valve Control<br/>OLED Display"]
+        LocalCtrl["Local Leak Rules<br/>OLED Display"]
         SDCard["SD Card Logger<br/>(Offline Backup)"]
         
         Sensors --> Features
@@ -49,7 +49,7 @@ graph TB
         direction TB
         Readings["/readings/{device_id}/{ts}<br/>Raw sensor data"]
         Alerts["/alerts/{alert_id}<br/>Leak events"]
-        Commands["/commands/{device_id}<br/>Valve control"]
+        Commands["/commands/{device_id}<br/>Device commands"]
         Models["/models/{version}<br/>ML metadata"]
     end
 
@@ -73,7 +73,7 @@ graph TB
     subgraph "User Layer"
         Dashboard["Web Dashboard<br/>Real-time Charts"]
         Notif["Telegram / Email<br/>Alerts"]
-        ValveCmd["Remote Valve<br/>Control"]
+        Cmd["Remote Device<br/>Control"]
     end
 
     B --> Sensors
@@ -92,8 +92,8 @@ graph TB
     
     Flask --> Dashboard
     AlertEngine --> Notif
-    Dashboard --> ValveCmd
-    ValveCmd --> Commands
+    Dashboard --> Cmd
+    Cmd --> Commands
 ```
 
 </details>
@@ -131,8 +131,8 @@ Step 4: RPi PROCESSING (polling via Firebase Admin SDK)
 Step 5: USER ACTION
         → Dashboard displays real-time readings
         → Telegram / Email alert sent
-        → User sends valve command → /commands/{device_id}
-        → ESP32 Firebase listener receives command → activates relay
+        → User sends command → /commands/{device_id}
+        → ESP32 Firebase listener receives command → executes action
 ```
 
 ---
@@ -146,7 +146,7 @@ Step 5: USER ACTION
 | RPi → Firebase | Read + Write | REST | Firebase Admin SDK |
 | Firebase → RPi | Poll (HTTP) | REST | Firebase Admin SDK |
 | User → Dashboard | HTTP/WebSocket | HTTPS | Flask + JavaScript |
-| Dashboard → Valve | Write to /commands | HTTPS | Fetch API |
+| Dashboard → Commands | Write to /commands | HTTPS | Fetch API |
 
 ---
 

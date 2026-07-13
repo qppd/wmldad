@@ -9,17 +9,13 @@
 | Component | Specification | Qty | Justification |
 |-----------|--------------|-----|---------------|
 | **ESP32 38-Pin Dev Board** | CP2102, Xtensa LX6 dual-core, WiFi + BLE | 1 | 5 simultaneous ISRs, WiFi stack, Firebase library support |
-| **ESP32 Expansion Board** | Screw terminals, labeled pinout, breadboard-friendly | 1 | Clean wiring for 5 sensors + relays + peripherals |
+| **ESP32 Expansion Board** | Screw terminals, labeled pinout, breadboard-friendly | 1 | Clean wiring for 5 sensors + peripherals |
 | **YF-S201 Flow Sensor** | 1/2" thread, Hall-effect pulse output, 450 PPL nominal | 5 | Industry-standard for Arduino/ESP32 projects, cheap & reliable |
 | **Check Valve 1/2"** | Brass or PVC, non-return | 4 | Prevents backflow between fixtures (critical for per-fixture monitoring) |
-| **Solenoid Valve 1/2" NC** | 12V, Normally Closed | 4–5 | Automatic shutoff per fixture when leak detected |
-| **4-Ch Relay Module** (or 5-ch) | 5V, optocoupler isolated, active LOW | 1 | Drives solenoid valves (5 valves = 5-ch relay) |
 | **OLED 128×64** | SSD1306, I²C, 0.96" | 1 | Live display of per-fixture readings |
 | **Micro SD Card Module** | SPI interface | 1 | Data backup during WiFi/Firebase outages |
 | **Active Buzzer** | 5V | 1 | Audible alarm on leak detection |
 | **Power Supply** | 5V 2A USB adapter | 1 | Powers ESP32 + sensors |
-| **Power Supply** | 12V 2A adapter (valves only) | 1 | Separate supply for solenoid valves |
-| **LM2596 DC-DC** | Step-down regulator | 1 | (Optional) if using single 12V rail |
 | **Breadboard + Jumpers** | 830 points + 65 wires | 1 set | Prototyping |
 | **ABS Project Box** | 200×120×70mm | 1 | Enclosure with cable glands |
 
@@ -48,28 +44,36 @@
 #include <Firebase_ESP_Client.h>
 
 FirebaseData fbData;
+FirebaseData fbStream;
 FirebaseAuth fbAuth;
 FirebaseConfig fbConfig;
 
-// Initialize
-fbConfig.api_key = FIREBASE_API_KEY;
-fbConfig.database_url = FIREBASE_DATABASE_URL;
-fbAuth.user.email = FIREBASE_USER_EMAIL;
-fbAuth.user.password = FIREBASE_USER_PASSWORD;
+unsigned long dataMillis = 0;
+bool streamCommand = false;
 
-Firebase.begin(&fbConfig, &fbAuth);
-Firebase.reconnectWiFi(true);
-
-// Push reading
-FirebaseJson json;
-json.set("inlet/flow_rate", 12.5);
-json.set("inlet/volume", 2.5);
-Firebase.pushJSON(fbData, "/readings/device_001", json);
-
-// Stream commands
-Firebase.stream(fbData, "/commands/device_001");
-if (fbData.streamAvailable()) {
-    String cmd = fbData.stringData();
+void setupFirebase() {
+    fbConfig.api_key = FIREBASE_API_KEY;
+    fbConfig.database_url = FIREBASE_DATABASE_URL;
+    
+    // Sign-in method: Email/Password
+    fbAuth.user.email = FIREBASE_USER_EMAIL;
+    fbAuth.user.password = FIREBASE_USER_PASSWORD;
+    
+    // Token callback
+    fbConfig.token_status_callback = tokenStatusCallback;
+    
+    Firebase.begin(&fbConfig, &fbAuth);
+    Firebase.reconnectWiFi(true);
+    
+    // Set buffer size for large payloads
+    fbData.setResponseSize(1024);
+    fbStream.setResponseSize(1024);
+    
+    // Start command stream
+    String streamPath = "/commands/" + String(DEVICE_ID);
+    if (Firebase.RTDB.beginStream(&fbStream, streamPath)) {
+        Serial.println("Firebase stream started on: " + streamPath);
+    }
 }
 ```
 
@@ -112,7 +116,7 @@ if (fbData.streamAvailable()) {
 
 | Model | Type | Framework | Task | Where it runs |
 |-------|------|-----------|------|--------------|
-| **XGBoost** | Gradient-boosted decision tree | xgboost Python | 4-class classification (normal, minor_leak, major_leak, anomaly) | RPi (Flask) |
+| **XGBoost** | Gradient-boosted decision tree | xgboost Python | 3-class classification (normal, minor_leak, major_leak) | RPi (Flask) |
 | **Isolation Forest** | Unsupervised ensemble | scikit-learn | Binary anomaly/not-anomaly | RPi (Flask) |
 
 ### Feature Set (9 features)
@@ -136,7 +140,6 @@ if (fbData.streamAvailable()) {
 | `normal` | Regular water usage (faucet, flush, shower) | Label 0 |
 | `minor_leak` | Drip / slow leak (0.1–0.5 L/min sustained >30s) | Label 1 |
 | `major_leak` | Burst / stuck valve (>5 L/min for >30s) | Label 2 |
-| `anomaly` | Unrecognized pattern / sensor fault | Label 3 (partial labels) |
 
 > See [ML Model](./ml-model.md) for complete model training guide and performance benchmarks.
 
@@ -195,4 +198,4 @@ if (fbData.streamAvailable()) {
 | XGBoost | Random Forest, LightGBM, CNN | Best for tabular time-series |
 | Isolation Forest | Autoencoder, One-Class SVM | Unsupervised, low memory |
 | RPi (Raspberry Pi) | Heroku, Railway, cloud VPS | One-time cost, no monthly fees, full local control |
-| ESP32 38-pin NodeMCU-32S | 30-pin, ESP32-C3, ESP8266 | More GPIOs for 5 sensors + relays |
+| ESP32 38-pin NodeMCU-32S | 30-pin, ESP32-C3, ESP8266 | More GPIOs for 5 sensors + peripherals |

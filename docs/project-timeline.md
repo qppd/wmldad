@@ -1,7 +1,7 @@
 # Project Timeline — Student Capstone Guide
 
-> **Project:** Smart Water Meter with Leak Detection & Anomaly Detection
-> **Duration:** 16 weeks (1 semester)
+> **Project:** Smart Water Meter with Leak Detection & Anomaly Detection  
+> **Duration:** 16 weeks (1 semester)  
 > **Team Size:** 2–4 students
 
 ---
@@ -34,7 +34,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Complete system architecture and component selection |
-|  **Tasks** | • Draw system architecture diagram<br/>• Select all hardware (ESP32, sensors, valves)<br/>• Select software stack (Firebase, RPi, XGBoost)<br/>• Create block diagram<br/>• Assign GPIO pins on ESP32<br/>• Draft plumbing layout |
+|  **Tasks** | • Draw system architecture diagram<br/>• Select all hardware (ESP32, sensors, check valves)<br/>• Select software stack (Firebase, RPi, XGBoost)<br/>• Create block diagram<br/>• Assign GPIO pins on ESP32<br/>• Draft plumbing layout |
 |  **Deliverable** | System Architecture Document, Block Diagram, BOM |
 |  **Risk** | Start ordering parts NOW — shipping from Shopee/Lazada can take 1–2 weeks |
 
@@ -78,14 +78,14 @@ Each week includes:
 |  **Deliverable** | ESP32 → Firebase data pipeline working. Data visible in Firebase Console. |
 |  **Risk** | Firebase Authentication setup is tricky. Double-check API key and email/password. |
 
-### Week 7: Local Leak Rules + Relay Control
+### Week 7: Local Leak Rules
 
 | Item | Activity |
 |------|----------|
-|  **Goal** | Local leak detection (non-ML fallback) + valve control |
-|  **Tasks** | • Implement local leak rules (inlet balance, continuous flow, drip)<br/>• Wire 4-channel relay module<br/>• Connect LED indicators for leak status<br/>• Test: simulate a leak and verify relay activation<br/>• Test: remote valve command via Firebase |
-|  **Deliverable** | ESP32 detects leaks locally and controls relays. Verified with simulated leaks. |
-|  **Risk** | Solenoid valves draw high current — use separate 12V supply. Never power from ESP32 5V. |
+|  **Goal** | Local leak detection (non-ML fallback) |
+|  **Tasks** | • Implement local leak rules (inlet balance, continuous flow, drip)<br/>• Connect LED indicators for leak status<br/>• Test: simulate a leak and verify detection<br/>• Test: remote command via Firebase |
+|  **Deliverable** | ESP32 detects leaks locally. Verified with simulated leaks. |
+|  **Risk** | Focus on detection logic first. The system uses check valves for backflow prevention; automatic shutoff via solenoid valves is not included in this version. |
 
 ---
 
@@ -114,7 +114,7 @@ Each week includes:
 | Item | Activity |
 |------|----------|
 |  **Goal** | Complete data pipeline working: Sensor → ESP32 → Firebase → RPi → ML → Alert |
-|  **Tasks** | • Wire ML inference into Flask app<br/>• Test: simulate leak, verify ML detects it<br/>• Test: alert appears in web dashboard<br/>• Test: Telegram/email notification sent<br/>• Verify valve command flow (dashboard → Firebase → ESP32 → relay) |
+|  **Tasks** | • Wire ML inference into Flask app<br/>• Test: simulate leak, verify ML detects it<br/>• Test: alert appears in web dashboard<br/>• Test: Telegram/email notification sent |
 |  **Deliverable** | Full system working end-to-end with all 5 sensors |
 |  **Risk** | Combine all components one at a time. Test each integration step before adding the next. |
 
@@ -188,7 +188,7 @@ Each week includes:
 |------|-----------|------------------|
 | 3 | 🟢 Parts received, tools installed | 🟢 |
 | 5 | 🟢 ESP32 reading all 5 sensors | 🟢 |
-| 7 | 🟢 Local leak detection + valve control | 🟢 |
+| 7 | 🟢 Local leak detection | 🟢 |
 | 8 | 🟢 Flask app live on RPi | 🟢 |
 | 10 | 🟢 End-to-end: Sensor → Firebase → ML → Alert | 🟢🟢 |
 | 11 | 🟢 All sensors calibrated (< 3% error) | 🟢 |
@@ -231,14 +231,13 @@ Each week includes:
 | ESP32 + Expansion Board | ₱630 |
 | 5× YF-S201 Flow Sensors | ₱900 |
 | Check Valves + PVC Fittings | ₱730 |
-| Relay + Solenoid Valves | ₱2,225 |
 | OLED + Buzzer + LEDs | ₱375 |
 | Breadboard + Jumpers + Resistors | ₱375 |
 | Enclosure + Hardware | ₱520 |
-| Power Supplies | ₱600 |
-| **Total Hardware** | **~₱7,410** |
+| Power Supplies | ₱400 |
+| **Total Hardware** | **~₱4,330** |
 | Raspberry Pi (4/5) | ₱2,500 |
-| **Grand Total** | **~₱9,910** |
+| **Grand Total** | **~₱6,830** |
 
 >  **Tip:** Request budget from department. Many schools have ₱5,000–₱10,000 capstone budget per group.
 
@@ -247,10 +246,9 @@ Each week includes:
 ## References for Students
 
 1. Firebase-ESP-Client Library: https://github.com/mobizt/Firebase-ESP-Client
-
-3. XGBoost Documentation: https://xgboost.readthedocs.io/
-4. Scikit-learn Isolation Forest: https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html
-5. YF-S201 Datasheet: https://www.adafruit.com/product/828
-6. ESP32 Arduino Core: https://github.com/espressif/arduino-esp32
-7. Firebase Console: https://console.firebase.google.com/
-8. Makerlab Electronics: https://shopee.ph/makerlabelectronics
+2. XGBoost Documentation: https://xgboost.readthedocs.io/
+3. Scikit-learn Isolation Forest: https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html
+4. YF-S201 Datasheet: https://www.adafruit.com/product/828
+5. ESP32 Arduino Core: https://github.com/espressif/arduino-esp32
+6. Firebase Console: https://console.firebase.google.com/
+7. Makerlab Electronics: https://shopee.ph/makerlabelectronics

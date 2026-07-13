@@ -8,7 +8,7 @@
 ## Database Root Structure
 
 ```
-/ (root)
+/
 ├── /readings/{device_id}/{ISO_timestamp}
 ├── /commands/{device_id}/{command_id}
 ├── /alerts/{device_id}/{alert_id}
@@ -119,10 +119,10 @@ Written by **RPi backend** or **Web Dashboard**, streamed to **ESP32** via Fireb
   "commands": {
     "wm_001": {
       "cmd_001": {
-        "command": "close_fix1",
+        "command": "calibrate",
         "timestamp": "2026-07-10T08:05:00Z",
         "source": "dashboard",
-        "reason": "leak_detected",
+        "reason": "calibration_requested",
         "executed": false
       }
     }
@@ -134,15 +134,6 @@ Written by **RPi backend** or **Web Dashboard**, streamed to **ESP32** via Fireb
 
 | Command | Target | Description |
 |---------|--------|-------------|
-| `close_all` | All | Close all solenoid valves |
-| `open_all` | All | Open all solenoid valves |
-| `close_inlet` | Inlet (relay 1) | Close main inlet valve |
-| `close_fix1` | Fixture 1 (relay 2) | Close fixture 1 valve |
-| `close_fix2` | Fixture 2 (relay 3) | Close fixture 2 valve |
-| `close_fix3` | Fixture 3 (relay 4) | Close fixture 3 valve |
-| `close_fix4` | Fixture 4 (relay 5) | Close fixture 4 valve |
-| `open_inlet` | Inlet | Open inlet valve |
-| `open_fix1` | Fixture 1 | Open fixture 1 valve |
 | `calibrate` | All | Start calibration mode |
 | `calibrate_inlet` | Inlet | Calibrate inlet sensor only |
 | `reboot` | All | Reboot ESP32 |
@@ -171,8 +162,8 @@ Written by **RPi backend (ML-based)** or **ESP32** (local rules).
           "inlet_ratio": 1.3,
           "anomaly_score": null
         },
-        "valve_action": "closed",
-        "valve_state": "closed",
+        "valve_action": "monitoring",
+        "valve_state": "open",
         "timestamp": "2026-07-10T08:05:00Z",
         "resolved": false,
         "resolved_at": null,
@@ -187,8 +178,8 @@ Written by **RPi backend (ML-based)** or **ESP32** (local rules).
 
 | Type | Severity | Description | Action |
 |------|----------|-------------|--------|
-| `minor_leak` | Warning | Drip / slow leak | Close valve + notify |
-| `major_leak` | Critical | Burst / stuck valve | Close valve + alarm + emergency notify |
+| `minor_leak` | Warning | Drip / slow leak | Log + notify |
+| `major_leak` | Critical | Burst / stuck valve | Log + alarm + emergency notify |
 | `anomaly` | Info | Unrecognized pattern | Log + review |
 | `hidden_leak` | Warning | Inlet >> sum(fixtures) | Alert (unknown leak) |
 | `sensor_fault` | Warning | Sensor reading inconsistency | Flag for maintenance |
@@ -214,7 +205,7 @@ Written on device registration, updated by ESP32.
         {"id": 3, "name": "fix3", "fixture": "wash_basin", "pin": 33},
         {"id": 4, "name": "fix4", "fixture": "shower", "pin": 25}
       ],
-      "valves": [true, true, true, true, true],
+      "valves": [false, false, false, false, false],
       "status": {
         "online": true,
         "last_seen": "2026-07-10T08:00:00Z",
@@ -291,7 +282,7 @@ Dashboard-adjustable device parameters.
       "confidence_threshold": 0.80,
       "alert_telegram": true,
       "alert_email": false,
-      "auto_shutoff": true,
+      "auto_shutoff": false,
       "night_mode_quiet": false
     }
   }
@@ -396,7 +387,7 @@ if readings:
 
 # Write a command to ESP32
 firebase_db.reference(f"commands/{DEVICE_ID}").push({
-    "command": "close_fix1",
+    "command": "calibrate",
     "timestamp": get_timestamp(),
     "source": "ml_model"
 })
