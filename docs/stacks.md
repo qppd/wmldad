@@ -87,7 +87,6 @@ void setupFirebase() {
 | **Data** | pandas, numpy | Latest | Feature engineering |
 | **Scheduling** | systemd + cron | Built-in | Daily model retraining via cron |
 | **Templates** | Jinja2 + Chart.js | — | Dashboard HTML/JS |
-| **Notifications** | Telegram Bot API / smtplib | — | Alert delivery |
 
 ---
 
