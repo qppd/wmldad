@@ -13,7 +13,6 @@
 | **Language** | C++11/Arduino | — | Standard for ESP32 |
 | **Firebase** | [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) | ≥ 4.4.x | Full Firebase Realtime DB support — push, set, update, stream, auth |
 | **JSON** | ArduinoJson | ≥ 7.x | Payload serialization for Firebase |
-| **SD Card** | SD_MMC / SD (ESP32) | Built-in | Local data backup |
 | **WiFi** | WiFi.h (Arduino) | Built-in | Station mode, auto-reconnect |
 | **NTP** | NTPClient / configTime() | Built-in | Time sync for timestamped data |
 | **OTA** | ArduinoOTA | Built-in | Over-the-air firmware updates |
