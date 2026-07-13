@@ -49,7 +49,7 @@ Serial.println("Reset reason: " + String(esp_reset_reason()));
 | Cause | Check | Fix |
 |-------|-------|-----|
 | Wrong GPIO pin | Verify `SENSOR_PINS[]` in config.h | Match config to actual wiring |
-| Loose connection | Inspect jumper wires | Push firmly or re-seat |
+| Loose connection | Inspect connections | Push firmly or re-seat |
 | Sensor not powered | Measure VCC pin | Should be 4.5V–5V |
 | Arrow wrong direction | Arrow on sensor body | Install with flow direction |
 | Air trapped | Bubbles in sensor chamber | Tap sensor, purge air |

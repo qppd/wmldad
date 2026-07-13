@@ -2,7 +2,7 @@
 
 > **Target audience:** Students / researchers building a capstone project  
 > **Estimated time:** 2–3 weeks (part-time)  
-> **Prerequisites:** Basic electronics (solderless breadboard), basic programming
+> **Prerequisites:** Basic electronics, basic programming
 
 ---
 
@@ -33,10 +33,9 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 | ESP32 38-pin Expansion Board | 1 | ₱180 |
 | YF-S201 Flow Sensor | 4 | ₱720 |
 | Check Valve 1/2" | 3 | ₱360 |
-| Breadboard + Jumper Wires | 1 set | ₱150 |
+| Perf board + soldering | 1 set | ₱115 |
 | USB Micro Data Cable | 1 | ₱100 |
-| 5V 2A USB Power Adapter | 1 | ₱150 |
-| **Minimum Total** | | **~₱2,110** |
+| **Minimum Total** | | **~₱2,035** |
 
 ### Required Tools
 
