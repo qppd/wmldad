@@ -62,6 +62,9 @@ FirebaseData fbStream;
 FirebaseAuth fbAuth;
 FirebaseConfig fbConfig;
 
+bool firebaseReady = false;
+unsigned long lastUpload = 0;
+
 void setupFirebase() {
     fbConfig.api_key = FIREBASE_API_KEY;
     fbConfig.database_url = FIREBASE_DATABASE_URL;
@@ -81,7 +84,7 @@ void setupFirebase() {
     // Start command stream
     String streamPath = "/commands/" + String(DEVICE_ID);
     if (Firebase.RTDB.beginStream(&fbStream, streamPath)) {
-        Serial.println("Stream started: " + streamPath);
+        Serial.println("Firebase stream started on: " + streamPath);
     }
 }
 ```
@@ -114,8 +117,6 @@ void uploadReadings(SensorMetrics metrics[4]) {
         json.set(prefix + "/volume", metrics[i].volume);
         json.set(prefix + "/total", metrics[i].total);
         json.set(prefix + "/pulse_count", metrics[i].pulseCount);
-        json.set(prefix + "/k_factor", (i==1?PPL_FIX1:(i==2?PPL_FIX2:PPL_FIX3)));
-        json.set(prefix + "/fixture_name", (i==1?"bidet":(i==2?"kitchen":"bathroom_shower")));
     }
     
     // Device metadata
@@ -166,14 +167,14 @@ void processStream() {
     if (!Firebase.RTDB.streamAvailable(&fbStream)) return;
     
     String path = fbStream.dataPath();      // e.g., "/cmd_123"
-    String type = fbStream.dataType();      // "json", "string", "int", etc.
+    String type = fbStream.dataType();      // "json", "string", "int"
     String value = fbStream.stringData();   // Raw value
     
     Serial.printf("Stream: path=%s, type=%s, value=%s\n", 
                   path.c_str(), type.c_str(), value.c_str());
     
     if (path == "/") {
-        // Full payload update (initial sync or large update)
+        // Full payload update
         if (type == "json") {
             FirebaseJson &json = fbStream.jsonObject();
             processCommandJson(json);
@@ -199,7 +200,6 @@ void processCommandJson(FirebaseJson &json) {
     } else if (command == "reboot") {
         ESP.restart();
     } else if (command == "update_config") {
-        // Handle config update
         FirebaseJsonData pplData;
         if (json.get(pplData, "pulse_per_liter_inlet")) {
             PPL_INLET = pplData.floatValue;
@@ -254,17 +254,20 @@ import time
 from datetime import datetime
 
 class FirebaseListener:
-    def __init__(self, config_path, email, password, device_id):
+    def __init__(self, config_path, email, password, device_id, poll_interval=5):
         self.device_id = device_id
+        self.poll_interval = poll_interval
         self.last_timestamp = None
         self.running = False
+        self._detector = None
+        self._alert_engine = None
         
         # Load config
         with open(config_path) as f:
-            config = json.load(f)
+            self.firebase_config = json.load(f)
         
         # Initialize Pyrebase4
-        self.firebase = pyrebase.initialize_app(config)
+        self.firebase = pyrebase.initialize_app(self.firebase_config)
         self.auth = self.firebase.auth()
         self.db = self.firebase.database()
         
@@ -277,6 +280,7 @@ class FirebaseListener:
         self.readings_ref = self.db.child(f"readings/{device_id}")
         self.alerts_ref = self.db.child(f"alerts/{device_id}")
         self.commands_ref = self.db.child(f"commands/{device_id}")
+        self.device_ref = self.db.child(f"devices/{device_id}")
     
     def _refresh_token(self):
         """Refresh auth token if expired"""
@@ -289,11 +293,22 @@ class FirebaseListener:
             self.user = self.auth.sign_in_with_email_and_password(email, password)
             self.id_token = self.user['idToken']
     
+    def set_detector(self, detector):
+        self._detector = detector
+    
+    def set_alert_engine(self, alert_engine):
+        self._alert_engine = alert_engine
+    
     def start(self):
         """Start polling thread"""
         self.running = True
         self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self.poll_thread.start()
+    
+    def stop(self):
+        self.running = False
+        if self.poll_thread:
+            self.poll_thread.join(timeout=5)
     
     def _poll_loop(self):
         while self.running:
@@ -303,10 +318,10 @@ class FirebaseListener:
                 print(f"Poll error: {e}")
                 if "permission" in str(e).lower() or "unauthorized" in str(e).lower():
                     self._refresh_token()
-            time.sleep(5)  # Poll every 5 seconds
+            time.sleep(self.poll_interval)
     
     def _check_new_readings(self):
-        """Fetch latest reading since last timestamp"""
+        """Fetch latest reading from Firebase"""
         readings = self.readings_ref.order_by_key().limit_to_last(1).get(self.id_token)
         
         if readings and readings.val():
@@ -317,28 +332,96 @@ class FirebaseListener:
     
     def process_reading(self, data, timestamp):
         """Extract features and run ML inference"""
-        features = self.extract_features(data)
-        result = self.detector.predict(features)
+        if not self._detector:
+            return
         
-        if result['final'] != 'normal':
-            # Write alert to Firebase
-            alert_data = {
-                'alert_type': result['final'],
-                'timestamp': datetime.utcnow().isoformat() + 'Z',
-                'confidence': result.get('confidence', 0),
-                'fixture_index': data.get('fixture_index', -1),
-                'action': 'monitoring',
-                'details': {
-                    'flow_rate': data.get('fixture_1', {}).get('flow_rate', 0),
-                    'duration': features[1],
-                    'inlet_ratio': features[5],
-                    'anomaly_score': result['isolation_forest'].get('score')
-                }
+        try:
+            # Extract features for each fixture
+            inlet = data.get('inlet', {})
+            
+            for fixture_idx in [1, 2, 3]:
+                fixture_key = f'fixture_{fixture_idx}'
+                fixture = data.get(fixture_key, {})
+                
+                if fixture.get('flow_rate', 0) > 0.01:  # Only process if flowing
+                    features = self._extract_features(data, fixture_idx)
+                    result = self._detector.predict(features)
+                    
+                    if result['final'] != 'normal':
+                        self._write_alert(result, fixture_idx, data, timestamp)
+                        
+        except Exception as e:
+            print(f"Error processing reading: {e}")
+    
+    def _extract_features(self, data, fixture_idx):
+        """Extract 9 features from raw Firebase data"""
+        import numpy as np
+        from datetime import datetime
+        
+        inlet = data.get('inlet', {})
+        fixture = data.get(f'fixture_{fixture_idx}', {})
+        
+        # 1. Flow rate
+        flow_rate = fixture.get('flow_rate', 0)
+        
+        # 2. Duration (approximate from volume/rate)
+        volume = fixture.get('volume', 0)
+        duration = volume / max(flow_rate / 60, 0.01) if flow_rate > 0 else 0
+        
+        # 3-4. Time features
+        now = datetime.now()
+        hour = now.hour
+        day = now.weekday()
+        
+        # 5. Fixture ID
+        fixture_id = fixture_idx
+        
+        # 6. Inlet ratio
+        inlet_rate = inlet.get('flow_rate', 0)
+        inlet_ratio = inlet_rate / max(flow_rate, 0.01)
+        
+        # 7. Rate variance (simplified - would need rolling buffer)
+        rate_variance = 0
+        
+        # 8. Night flag
+        is_night = 1 if (hour >= 22 or hour < 5) else 0
+        
+        # 9. Pulse trend (simplified)
+        pulse_trend = 0
+        
+        return np.array([[
+            flow_rate, duration, hour, day, fixture_id,
+            inlet_ratio, rate_variance, is_night, pulse_trend
+        ]], dtype=np.float32)
+    
+    def _write_alert(self, result, fixture_idx, data, timestamp):
+        """Write alert to Firebase"""
+        alert_data = {
+            'alert_type': result['final'],
+            'timestamp': datetime.utcnow().isoformat() + 'Z',
+            'confidence': result.get('confidence', 0),
+            'fixture_index': fixture_idx,
+            'fixture_name': {1: 'bidet', 2: 'kitchen', 3: 'bathroom_shower'}.get(fixture_idx),
+            'action': 'monitoring',
+            'details': {
+                'flow_rate': data.get(f'fixture_{fixture_idx}', {}).get('flow_rate', 0),
+                'inlet_flow_rate': data.get('inlet', {}).get('flow_rate', 0),
+                'xgboost_class': result['xgboost']['class'],
+                'xgboost_confidence': result['xgboost']['confidence'],
+                'isolation_forest_anomaly': result['isolation_forest']['anomaly'],
+                'isolation_forest_score': result['isolation_forest']['score']
             }
+        }
+        
+        try:
             self.alerts_ref.push(alert_data, self.id_token)
+            print(f"⚠️ ALERT: {result['final']} on fixture {fixture_idx} (conf: {result.get('confidence', 0):.2f})")
             
             # Send notification
-            self.alert_engine.send_notification(alert_data)
+            if self._alert_engine:
+                self._alert_engine.send_notification(alert_data)
+        except Exception as e:
+            print(f"Failed to write alert: {e}")
     
     def get_latest_reading(self):
         readings = self.readings_ref.order_by_key().limit_to_last(1).get(self.id_token)
@@ -356,11 +439,18 @@ class FirebaseListener:
             'source': 'dashboard'
         }, self.id_token)
     
-    def extract_features(self, data):
-        """Extract 9 features from raw Firebase data"""
-        # Implementation matches training feature engineering
-        # See ml-training-guide.md for details
-        pass
+    def is_connected(self):
+        """Check if Firebase connection is healthy"""
+        try:
+            self.db.child('.info/connected').get(self.id_token)
+            return True
+        except:
+            return False
+    
+    def reconnect(self):
+        """Force reconnection"""
+        print("Reconnecting to Firebase...")
+        self._sign_in()
 ```
 
 ---
@@ -546,7 +636,7 @@ class FirebaseListener:
 void setup() {
     // Enable task watchdog (timeout: 30 seconds)
     esp_task_wdt_init(30, true);  // 30s timeout, panic on timeout
-    esp_task_wdt_add(NULL);       // Add current task
+    esp_task_wdt_add(NULL);       # Add current task
 }
 
 void loop() {
@@ -562,10 +652,13 @@ void loop() {
         lastUpload = millis();
     }
     
-    delay(100);  // Prevent watchdog reset
+    delay(100);  # Prevent watchdog reset
 }
+```
 
-// Network watchdog
+### Network Watchdogs
+
+```cpp
 void checkNetworkHealth() {
     static unsigned long lastWiFiCheck = 0;
     if (millis() - lastWiFiCheck > 60000) {  // Every minute
@@ -630,7 +723,7 @@ void queueToSpiffs(SensorMetrics metrics[4]) {
     if (!file) return;
     
     FirebaseJson json;
-    // ... build same JSON as upload ...
+    // ... build same JSON as uploadReadings ...
     
     String output;
     json.toString(output);
@@ -704,6 +797,16 @@ if not check_firebase_connectivity():
         ".write": "auth.uid == 'rpi-backend' || auth.uid == $device_id"
       }
     },
+    "devices": {
+      ".read": "auth != null",
+      "$device_id": {
+        ".write": "auth.uid == $device_id || auth.uid == 'dashboard-admin'"
+      }
+    },
+    "models": {
+      ".read": "auth != null",
+      ".write": "auth.uid == 'rpi-backend'"
+    },
     "config": {
       "$device_id": {
         ".read": "auth != null && auth.uid == $device_id",
@@ -730,7 +833,7 @@ configTime(0, 0, "pool.ntp.org");
 ```python
 # Store credentials in .env (gitignored)
 # .env file:
-FIREBASE_EMAIL=esp32@project.iam.gserviceaccount.com
+FIREBASE_EMAIL=esp32@your-project.iam.gserviceaccount.com
 FIREBASE_PASSWORD=strong_random_password
 DEVICE_ID=wm_001
 
@@ -782,7 +885,7 @@ void printFirebaseStatus() {
 def health():
     return jsonify({
         'status': 'healthy',
-        'firebase_connected': firebase_listener.is_connected(),
+        'firebase_connected': firebase_listener.is_connected() if hasattr(firebase_listener, 'is_connected') else True,
         'model_loaded': detector.model_loaded,
         'last_reading': firebase_listener.last_timestamp,
         'uptime_seconds': time.time() - start_time,
@@ -853,7 +956,3 @@ Proceed to:
 1. [Firebase Setup Guide](./firebase-setup-guide.md) — Complete Firebase project configuration
 2. [Project Setup Guide](./setup.md) — Full system deployment
 3. [Troubleshooting Guide](./troubleshooting.md) — Common issues and fixes
-
----
-
-*Last updated: July 2026 | Firebase-ESP-Client 4.4.9 | Pyrebase4 4.5.0 | Tested with ESP32 NodeMCU-32S, RPi 4/5*
