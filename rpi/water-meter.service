@@ -1,0 +1,24 @@
+[Unit]
+Description=Water Meter Leak Detection Backend
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/wmldad/rpi
+Environment=PATH=/home/pi/wmldad/rpi/.venv/bin
+EnvironmentFile=/home/pi/wmldad/rpi/.env
+ExecStart=/home/pi/wmldad/rpi/.venv/bin/python app.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=water-meter
+
+# Resource limits (adjust for your Pi model)
+MemoryLimit=1G
+CPUQuota=200%
+
+[Install]
+WantedBy=multi-user.target

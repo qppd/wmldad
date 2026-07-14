@@ -1,0 +1,66 @@
+# Project Root requirements.txt
+# This documents all Python dependencies across the project
+# For ESP32 firmware, dependencies are managed via Arduino Library Manager
+
+# ============================================
+# RASPBERRY PI BACKEND (rpi/requirements.txt)
+# ============================================
+# Web Framework
+flask>=3.0.0
+gunicorn>=21.0.0
+
+# Firebase
+pyrebase4>=4.5.0
+
+# Machine Learning (Inference only)
+xgboost>=2.0.3
+scikit-learn>=1.3.2
+pandas>=2.1.4
+numpy>=1.24.3
+joblib>=1.3.2
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# ============================================
+# ML TRAINING (training/requirements.txt)
+# ============================================
+# Data Processing
+pandas>=2.1.4
+numpy>=1.24.3
+
+# Machine Learning
+scikit-learn>=1.3.2
+xgboost>=2.0.3
+joblib>=1.3.2
+imbalanced-learn>=0.11.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+shap>=0.42.0
+
+# Notebook
+jupyter>=1.0.0
+ipykernel>=6.25.0
+
+# ============================================
+# ESP32 FIRMWARE - Arduino Libraries
+# ============================================
+# Install via Arduino IDE: Tools -> Manage Libraries
+# Firebase ESP Client by mobizt (>= 4.4.x)
+# ArduinoJson by Benoit Blanchon (>= 7.x)
+
+# ============================================
+# SYSTEM DEPENDENCIES (Raspberry Pi OS)
+# ============================================
+# Install with: sudo apt install -y <packages>
+# build-essential
+# python3-venv
+# python3-pip
+# libopenblas0
+# libatlas-base-dev
+# libgomp1
+# libjpeg-dev
+# zlib1g-dev
