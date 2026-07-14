@@ -1831,6 +1831,132 @@ sudo systemctl daemon-reload && sudo systemctl enable water-meter && sudo system
 
 ---
 
+## 17. Touchscreen Setup (800×480 LCD)
+
+The Water Meter project includes a **7" Touchscreen LCD (800×480)** connected via HDMI + USB for touch input. This provides a local dashboard display without needing a remote computer.
+
+### 17.1 Hardware Connection
+| Connection | Pi Port | LCD Port |
+|------------|---------|----------|
+| HDMI | HDMI 0 (Pi 4/5) / HDMI (Pi 3B+) | HDMI input |
+| USB Touch | Any USB 2.0/3.0 | USB Micro-B (touch controller) |
+| Power | 5V GPIO pins (2/4) or USB | 5V input |
+
+> **Note:** Most 7" 800×480 touchscreens (Waveshare, Elecrow, generic) use HDMI for video and USB for touch. Some use DSI ribbon cable — check your specific model.
+
+### 17.2 Configure Display Resolution
+```bash
+# Edit config.txt
+sudo nano /boot/firmware/config.txt
+
+# Add/modify these lines for 800x480:
+hdmi_force_hotplug=1
+hdmi_group=2
+hdmi_mode=87
+hdmi_cvt=800 480 60 6 0 0 0
+hdmi_drive=2
+
+# For DSI displays (ribbon cable), use instead:
+# dtoverlay=vc4-kms-v3d
+# dtoverlay=waveshare-7inch-dsi  # or your specific overlay
+
+sudo reboot
+```
+
+### 17.3 Auto-launch Chromium in Kiosk Mode (Dashboard on Boot)
+Create a systemd user service to auto-start the dashboard on the touchscreen:
+
+```bash
+# Create autostart directory
+mkdir -p ~/.config/autostart
+
+# Create desktop entry for Chromium kiosk
+cat > ~/.config/autostart/chromium-kiosk.desktop << 'EOF'
+[Desktop Entry]
+Type=Application
+Name=Water Meter Dashboard
+Exec=chromium-browser --noerrdialogs --disable-infobars --kiosk --start-fullscreen http://localhost:5000/
+Hidden=false
+X-GNOME-Autostart-enabled=true
+EOF
+```
+
+### 17.4 Hide Mouse Cursor (Touch-Only)
+```bash
+# Install unclutter to hide mouse after inactivity
+sudo apt install -y unclutter
+
+# Create systemd user service for unclutter
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/unclutter.service << 'EOF'
+[Unit]
+Description=Hide mouse cursor for touchscreen
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/unclutter -idle 1 -root
+Restart=always
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Enable and start
+systemctl --user daemon-reload
+systemctl --user enable unclutter.service
+systemctl --user start unclutter.service
+```
+
+### 17.5 Disable Screen Blanking
+```bash
+# Edit lightdm config (for desktop autologin)
+sudo nano /etc/lightdm/lightdm.conf
+
+# Under [Seat:*], add:
+[Seat:*]
+xserver-command=X -s 0 -dpms
+
+# Or via raspi-config:
+sudo raspi-config
+# Display Options → Screen Blanking → Disable
+```
+
+### 17.6 Touchscreen Calibration (If Needed)
+```bash
+# Install calibration tool
+sudo apt install -y xinput-calibrator
+
+# Run calibration
+DISPLAY=:0 xinput_calibrator
+
+# Copy output to X11 config
+sudo mkdir -p /etc/X11/xorg.conf.d
+sudo nano /etc/X11/xorg.conf.d/99-calibration.conf
+
+# Paste the calibration matrix from xinput_calibrator output
+# Example:
+# Section "InputClass"
+#     Identifier "calibration"
+#     MatchProduct "Your Touchscreen Name"
+#     Option "Calibration" "min_x max_x min_y max_y"
+#     Option "SwapAxes" "0"
+# EndSection
+```
+
+### 17.7 Verify Touchscreen Works
+```bash
+# Check touch device detected
+ls /dev/input/ | grep -i touch
+
+# List input devices
+xinput list
+
+# Test: touch screen should move cursor / click
+```
+
+---
+
 ## Next Steps After Setup
 
 1. **Hardware:** Wire ESP32 + 4× YF-S201 per [block-diagram.md](./block-diagram.md)

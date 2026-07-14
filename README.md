@@ -13,7 +13,7 @@ Follow these steps **in order**. Each step links to the detailed guide.
 | Step | Action | Guide | Est. Time |
 |------|--------|-------|-----------|
 | 1 | **Buy parts** — Order from BOM (Makerlab Electronics on Shopee/Lazada) | [BOM.md](./docs/bom.md) | 1–2 weeks shipping |
-| 2 | **Flash Raspberry Pi OS** — Trixie 64-bit, enable SSH + WiFi in Imager | [raspberry-pi-installation.md](./docs/raspberry-pi-installation.md) | 30 min |
+| 2 | **Flash Raspberry Pi OS** — Trixie 64-bit, enable SSH + WiFi in Imager | [pi-complete-setup.md](./docs/pi-complete-setup.md#1-download--flash-raspberry-pi-os) | 30 min |
 | 3 | **Create Firebase project** — Realtime DB + Email/Password auth + web app config | [firebase-setup-guide.md](./docs/firebase-setup-guide.md) | 20 min |
 
 > ⚠️ **Do Step 1–3 in parallel.** Hardware shipping takes longest.
@@ -34,12 +34,12 @@ Follow these steps **in order**. Each step links to the detailed guide.
 
 | Step | Action | Guide | Est. Time |
 |------|--------|-------|-----------|
-| 7 | **Install Arduino IDE 2.x** (Flatpak on RPi, or Windows/macOS) | [arduino-ide-installation.md](./docs/arduino-ide-installation.md) | 15 min |
-| 8 | **Add ESP32 board support** — Board Manager URL + install `esp32:esp32` | [esp32-setup-guide.md](./docs/esp32-setup-guide.md#arduino-ide-board-configuration) | 10 min |
-| 9 | **Install libraries** — `Firebase ESP Client` (mobizt) + `ArduinoJson` | [firmware.md](./docs/firmware.md#required-libraries) | 5 min |
-| 10 | **Configure `config.h`** — WiFi, Firebase API key, DB URL, user email/password, device ID | [setup.md#phase-5-esp32-firmware-upload](./docs/setup.md#phase-5-esp32-firmware-upload) | 10 min |
-| 11 | **Upload firmware** — Select NodeMCU-32S, correct port, Upload (Ctrl+U) | [esp32-setup-guide.md](./docs/esp32-setup-guide.md#upload-process--boot-modes) | 5 min |
-| 12 | **Verify** — Serial Monitor (115200): WiFi connect → Firebase stream start → sensor ISRs attached | [setup.md](./docs/setup.md#step-53-monitor-serial-output) | 5 min |
+| 7 | **Install Arduino IDE 2.x** via `pip install arduino` on RPi (or Windows/macOS) | [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md#arduino-ide-installation-on-raspberry-pi-os-trixie) | 15 min |
+| 8 | **Add ESP32 board support** — Board Manager URL + install `esp32 by Espressif Systems` | [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md#esp32-board-support-configuration) | 10 min |
+| 9 | **Install library** — `Firebase ESP Client` by Mobizt (ArduinoJson bundled) | [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md#firebase-esp-client-library-setup) | 5 min |
+| 10 | **Configure `config.h`** — WiFi, Firebase API key, DB URL, user email/password, device ID | [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md#configuration-configh) | 10 min |
+| 11 | **Upload firmware** — Select NodeMCU-32S, correct port, Upload (Ctrl+U) | [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md#build-upload--verify) | 5 min |
+| 12 | **Verify** — Serial Monitor (115200): WiFi connect → Firebase stream start → sensor ISRs attached | [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md#verification) | 5 min |
 
 ---
 
@@ -53,15 +53,16 @@ Follow these steps **in order**. Each step links to the detailed guide.
 
 ---
 
-### Phase 5: Raspberry Pi Backend
+### Phase 5: Raspberry Pi Backend (with 800×480 Touchscreen LCD)
 
 | Step | Action | Guide | Est. Time |
 |------|--------|-------|-----------|
-| 14 | **SSH into RPi** — `ssh pi@water-meter.local` | [raspberry-pi-networking.md](./docs/raspberry-pi-networking.md) | 5 min |
-| 15 | **Clone repo + create venv + install deps** | [rpi-backend.md](./docs/rpi-backend.md#quick-start) | 10 min |
-| 16 | **Copy `firebase_config.json` + `.env`** (from Firebase web app config) | [rpi-backend.md](./docs/rpi-backend.md#firebase-configuration-pyrebase4) | 5 min |
-| 17 | **Run Flask** — `python app.py`, verify dashboard at `http://<rpi-ip>:5000/` | [rpi-backend.md](./docs/rpi-backend.md#running-the-backend) | 5 min |
-| 18 | **Enable systemd service** for auto-start on boot | [rpi-backend.md](./docs/rpi-backend.md#production-mode-systemd-service) | 5 min |
+| 14 | **SSH into RPi** — `ssh pi@water-meter.local` | [pi-complete-setup.md](./docs/pi-complete-setup.md#2-initial-boot--ssh-verification) | 5 min |
+| 15 | **Clone repo + create venv + install deps** | [pi-complete-setup.md](./docs/pi-complete-setup.md#10-create-python-virtual-environment) | 10 min |
+| 16 | **Copy `firebase_config.json` + `.env`** (from Firebase web app config) | [pi-complete-setup.md](./docs/pi-complete-setup.md#12-configure-firebase-credentials) | 5 min |
+| 17 | **Run Flask** — `python app.py`, verify dashboard at `http://water-meter.local:5000/` | [pi-complete-setup.md](./docs/pi-complete-setup.md#15-verify-installation) | 5 min |
+| 18 | **Enable systemd service** for auto-start on boot | [pi-complete-setup.md](./docs/pi-complete-setup.md#16-systemd-service-for-auto-start) | 5 min |
+| 19 | **Configure 800×480 Touchscreen** — Auto-launch Chromium kiosk to dashboard | [pi-complete-setup.md](./docs/pi-complete-setup.md#touchscreen-setup-800x480-lcd) | 10 min |
 
 ---
 
@@ -69,9 +70,9 @@ Follow these steps **in order**. Each step links to the detailed guide.
 
 | Step | Action | Guide | Est. Time |
 |------|--------|-------|-----------|
-| 19 | **Train XGBoost + Isolation Forest** — Use Google Colab (GPU) | [ml-training-guide.md](./docs/ml-training-guide.md) | 30 min |
-| 20 | **Export models** — `xgboost_model.json`, `isolation_forest.pkl`, `scaler.pkl` to `rpi/models/` | [model-deployment-guide.md](./docs/model-deployment-guide.md) | 5 min |
-| 21 | **Verify inference** — Dashboard shows leak classifications | [ml-model.md](./docs/ml-model.md) | 5 min |
+| 20 | **Train XGBoost + Isolation Forest** — Use Google Colab (GPU) | [ml-complete-guide.md](./docs/ml-complete-guide.md#6-training-environment-setup) | 30 min |
+| 21 | **Export models** — `xgboost_model.json`, `isolation_forest.pkl`, `scaler.pkl` to `rpi/models/` | [ml-complete-guide.md](./docs/ml-complete-guide.md#12-model-export-all-artifacts) | 5 min |
+| 22 | **Verify inference** — Dashboard shows leak classifications | [ml-complete-guide.md](./docs/ml-complete-guide.md#14-model-loading--inference-ml_inferencepy) | 5 min |
 
 > 💡 **Skip for initial bring-up.** System works with local ESP32 rules (inlet balance, continuous flow, drip detection) without ML. Add ML after hardware + data pipeline verified.
 
@@ -81,8 +82,8 @@ Follow these steps **in order**. Each step links to the detailed guide.
 
 | Step | Action | Guide | Est. Time |
 |------|--------|-------|-----------|
-| 22 | **Router port forward** — External 8443 → RPi:5000 | [rpi-backend.md](./docs/rpi-backend.md#remote-access-port-forwarding--ddns) | 10 min |
-| 23 | **DDNS** (DuckDNS free) or **Cloudflare Tunnel** (HTTPS) | [rpi-backend.md](./docs/rpi-backend.md#dynamic-dns-optional-but-recommended) | 15 min |
+| 23 | **Router port forward** — External 8443 → RPi:5000 | [pi-complete-setup.md](./docs/pi-complete-setup.md#remote-access-optional) | 10 min |
+| 24 | **DDNS** (DuckDNS free) or **Cloudflare Tunnel** (HTTPS) | [pi-complete-setup.md](./docs/pi-complete-setup.md#remote-access-optional) | 15 min |
 
 ---
 
@@ -91,31 +92,14 @@ Follow these steps **in order**. Each step links to the detailed guide.
 | Guide | Purpose |
 |-------|---------|
 | [BOM.md](./docs/bom.md) | Parts list with Shopee links, prices |
-| [raspberry-pi-installation.md](./docs/raspberry-pi-installation.md) | Pi OS Trixie 64-bit + SSH + WiFi |
+| [pi-complete-setup.md](./docs/pi-complete-setup.md) | **Complete Pi OS → Backend deployment** (Flash → SSH/VNC → Venv → Deps → Firebase → Backend files → ML models → Systemd → Touchscreen) |
 | [firebase-setup-guide.md](./docs/firebase-setup-guide.md) | Firebase project, auth, web config, security rules |
-| [block-diagram.md](./docs/block-diagram.md) | Pinout, wiring, enclosure layout |
+| [block-diagram.md](./docs/block-diagram.md) | Pinout, wiring, enclosure layout, 3D models |
 | [setup.md](./docs/setup.md) | Full phased walkthrough (reference) |
 | [calibration.md](./docs/calibration.md) | Bucket test procedure |
-| [esp32-setup-guide.md](./docs/esp32-setup-guide.md) | Drivers, board select, boot modes, upload errors, Arduino IDE install |
-| [rpi-backend.md](./docs/rpi-backend.md) | Flask + Pyrebase4 + systemd + remote access |
-| [firmware.md](./docs/firmware.md) | ESP32 code structure, Firebase-ESP-Client usage |
+| [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md) | **Complete ESP32 firmware** (Arduino IDE → ESP32 Board → Firebase-ESP-Client → Config → Upload → Verify) |
+| [esp32-rpi-communication.md](./docs/esp32-rpi-communication.md) | USB serial auto-detection on `/dev/ttyUSB0/1`, JSON protocol |
 | [troubleshooting.md](./docs/troubleshooting.md) | Serial commands, LED codes, common fixes |
-
----
-
-## Guides Removed (Cause Delays)
-
-| Removed Guide | Why |
-|---------------|-----|
-| `ml-model.md` | Theory — read only if tuning model |
-| `ml-dataset-guide.md` | Data engineering — not needed for deployment |
-| `ml-training-guide.md` | Colab steps — only needed once for training |
-| `model-deployment-guide.md` | Edge optimization — default models work |
-| `project-timeline.md` | Student schedule — not for developers |
-| `stacks.md` | Version table — reference only |
-| `flowchart.md` / `system-architecture.md` | Diagrams — view once for understanding |
-| `raspberry-pi-networking.md` | SSH/mDNS — covered in Pi install guide |
-| `remote-desktop-guide.md` | RealVNC — not needed for headless operation |
 
 ---
 
@@ -129,6 +113,7 @@ Follow these steps **in order**. Each step links to the detailed guide.
 | Check Valve 1/2" | 3 | Brass/PVC, prevent backflow |
 | 12V 5A PSU + LM2596S buck | 1 | 220V → 12V → 5V |
 | IP67 ABS Enclosure | 1 | 175×125×75mm |
+| **7" Touchscreen LCD** | **1** | **800×480, HDMI + USB touch** |
 | JST-XH 3-pin M/F | 4 each | Pre-crimped, no crimp tool |
 | Perf board 20×80mm | 2 | Soldered connections |
 
@@ -142,7 +127,7 @@ After each phase, verify:
 - [ ] **Phase 2:** All 4 sensors show pulses in Serial Monitor when water flows
 - [ ] **Phase 3:** Firebase `/readings/wm_001/` updates every 5 sec
 - [ ] **Phase 4:** 5L bucket test → < 3% error on each sensor
-- [ ] **Phase 5:** Dashboard at `:5000` shows live flow rates per fixture
+- [ ] **Phase 5:** Dashboard at `:5000` shows live flow rates per fixture on **touchscreen LCD**
 - [ ] **Phase 6:** Leak simulation (slow drip) → alert appears in dashboard
 - [ ] **Phase 7:** Remote URL (DDNS:8443 or Cloudflare) loads dashboard
 

@@ -174,7 +174,7 @@ Step 5: USER ACTION
 | 12V 5A Switching PSU (S-60-12 / LRS-60-12) | 1 | Mains power → 12V |
 | LM2596S Buck Converter | 1 | 12V → 5V for ESP32 + sensors |
 | Waterproof ABS Enclosure IP67 (175×125×75mm) | 1 | Outdoor protection |
-| Raspberry Pi 4/5 + 7" Touchscreen LCD | 1 | Local dashboard + ML backend |
+| Raspberry Pi 4/5 + 7" Touchscreen LCD | 1 | Local dashboard + ML backend (800×480) |
 
 ---
 
