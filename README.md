@@ -47,7 +47,7 @@ Follow these steps **in order**. Each step links to the detailed guide.
 
 | Step | Action | Guide | Est. Time |
 |------|--------|-------|-----------|
-| 13 | **Bucket test each sensor** — 5L measured, calculate PPL, update `config.h` | [calibration.md](./docs/calibration.md) | 30 min/sensor |
+| 13 | **Bucket test each sensor** — 5L measured, calculate PPL, update `config.h` | [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md#sensor-calibration-bucket-test) | 30 min/sensor |
 
 > 🎯 Target: < 3% error per sensor. Uncalibrated sensors = false leaks / missed leaks.
 
@@ -96,8 +96,7 @@ Follow these steps **in order**. Each step links to the detailed guide.
 | [firebase-setup-guide.md](./docs/firebase-setup-guide.md) | Firebase project, auth, web config, security rules |
 | [block-diagram.md](./docs/block-diagram.md) | Pinout, wiring, enclosure layout, 3D models |
 | [setup.md](./docs/setup.md) | Full phased walkthrough (reference) |
-| [calibration.md](./docs/calibration.md) | Bucket test procedure |
-| [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md) | **Complete ESP32 firmware** (Arduino IDE → ESP32 Board → Firebase-ESP-Client → Config → Upload → Verify) |
+| [esp32-firmware-complete-guide.md](./docs/esp32-firmware-complete-guide.md) | **Complete ESP32 firmware** (Arduino IDE → ESP32 Board → Firebase-ESP-Client → Config → Upload → Verify → Calibration) |
 | [esp32-rpi-communication.md](./docs/esp32-rpi-communication.md) | USB serial auto-detection on `/dev/ttyUSB0/1`, JSON protocol |
 | [troubleshooting.md](./docs/troubleshooting.md) | Serial commands, LED codes, common fixes |
 
