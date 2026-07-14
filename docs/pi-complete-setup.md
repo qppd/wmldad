@@ -16,8 +16,7 @@
 4. [Configure Networking (WiFi + mDNS)](#4-configure-networking-wifi--mdns)
 5. [Expand Filesystem](#5-expand-filesystem)
 6. [System Update & Upgrade](#6-system-update--upgrade)
-7. [Install RealVNC Server](#7-install-realvnc-server)
-8. [Configure VNC for Touchscreen/Remote Access](#8-configure-vnc-for-touchscreenremote-access)
+7. [Enable RealVNC Server](#7-enable-realvnc-server)
 
 ### Phase 2: Project Setup
 9. [Clone Water Meter Project](#9-clone-water-meter-project)
@@ -252,11 +251,7 @@ sudo systemctl start vncserver-x11-serviced
 systemctl status vncserver-x11-serviced
 ```
 
----
-
-## 8. Configure VNC for Touchscreen/Remote Access
-
-### 8.1 Set VNC Password (Required for Touchscreen/Remote)
+### 7.3 Set VNC Password (Required for Touchscreen/Remote)
 ```bash
 # Set VNC password (different from user password)
 sudo -u pi vncpasswd -service
@@ -266,7 +261,7 @@ sudo -u pi vncpasswd -service
 sudo systemctl restart vncserver-x11-serviced
 ```
 
-### 8.2 Configure Display Resolution (for 800×480 Touchscreen)
+### 7.4 Configure Display Resolution (for 800×480 Touchscreen)
 ```bash
 # Set resolution for 7" touchscreen
 sudo raspi-config
@@ -280,11 +275,11 @@ echo "hdmi_cvt=800 480 60 6 0 0 0" | sudo tee -a /boot/firmware/config.txt
 sudo reboot
 ```
 
-### 8.3 Connect via VNC Viewer
+### 7.5 Connect via VNC Viewer
 1. Download **VNC Viewer** on your computer: https://www.realvnc.com/en/connect/download/viewer/
 2. Open VNC Viewer
 3. Enter: `water-meter.local` or `192.168.1.100`
-4. Enter VNC password (set in 8.1)
+4. Enter VNC password (set in 7.3)
 
 > 📸 **Screenshot Placeholder:** *VNC Viewer connecting to water-meter.local*
 
