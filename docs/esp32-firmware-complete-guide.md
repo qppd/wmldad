@@ -1,6 +1,6 @@
 # ESP32 Firmware Complete Guide — Hardware to Deployment
 
-> **Target:** ESP32 NodeMCU-32S (38-pin) with Expansion Board  
+> **Target:** ESP32 Dev Module (38-pin) with Expansion Board  
 > **Sensors:** 4× YF-S201 Flow Sensors (1 inlet + 3 fixtures)  
 > **Communication:** HTTPS + SSE Stream to Firebase Realtime Database  
 > **IDE:** Arduino IDE 2.x on Raspberry Pi OS Trixie 64-bit (or Windows/macOS)  
@@ -32,7 +32,7 @@
 
 | Component | Qty | Key Specs |
 |-----------|-----|-----------|
-| **ESP32 NodeMCU-32S** | 1 | 38-pin, CP2102 USB-UART, 4 MB Flash |
+| **ESP32 Dev Module** | 1 | 38-pin, CP2102/CH340 USB-UART, 4 MB Flash |
 | **ESP32 Expansion Board** | 1 | Screw terminals for all GPIOs |
 | **YF-S201 Flow Sensor** | 4 | 1/2" NPT, Hall effect, 5V, ~450 pulses/L |
 | **Check Valve 1/2"** | 3 | Brass/PVC, prevents backflow between fixtures |
@@ -119,11 +119,11 @@ Click **OK**.
 > 📸 **Screenshot Placeholder:** *Boards Manager showing "esp32 by Espressif Systems" installing with progress bar*
 
 ### 4. Select Your Board
-**Tools → Board → ESP32 Arduino → NodeMCU-32S**
+**Tools → Board → ESP32 Arduino → ESP32 Dev Module**
 
 | Setting | Value |
 |---------|-------|
-| **Board** | NodeMCU-32S |
+| **Board** | ESP32 Dev Module |
 | **Upload Speed** | 921600 |
 | **CPU Frequency** | 240 MHz (WiFi/BT) |
 | **Flash Mode** | QIO |
@@ -132,7 +132,7 @@ Click **OK**.
 | **Core Debug Level** | None |
 | **PSRAM** | Disabled |
 
-> ⚠️ **Critical:** Selecting **NodeMCU-32S** ensures correct pin mapping for 38-pin board. Do NOT use "ESP32 Dev Module" — pin definitions differ.
+> ⚠️ **Critical:** Selecting **ESP32 Dev Module** ensures correct pin mapping for 38-pin board. The GPIO pins in `config.h` (26, 25, 33, 32) match this board definition.
 
 ---
 
@@ -185,13 +185,6 @@ Click **OK**.
 
 ### No ArduinoJson Needed
 > **Important:** Firebase-ESP-Client v4.4+ bundles JSON handling internally. Do NOT install ArduinoJson separately — it causes conflicts.
-
-### PlatformIO (Alternative)
-```ini
-# platformio.ini
-lib_deps =
-    mobizt/Firebase ESP Client@^4.4.0
-```
 
 ---
 
@@ -758,7 +751,7 @@ FIXTURE 4 (GPIO 32):
 | Open Preferences | File → Preferences (`Ctrl+,`) |
 | Board Manager | Tools → Board → Boards Manager (`Ctrl+Shift+B`) |
 | Library Manager | Tools → Manage Libraries (`Ctrl+Shift+I`) |
-| Select Board | Tools → Board → ESP32 Arduino → **NodeMCU-32S** |
+| Select Board | Tools → Board → ESP32 Arduino → **ESP32 Dev Module** |
 | Select Port | Tools → Port → `/dev/ttyUSB0` or `COMx` |
 | Verify | Sketch → Verify/Compile (`Ctrl+R`) |
 | Upload | Sketch → Upload (`Ctrl+U`) |
@@ -779,4 +772,4 @@ After firmware deployed:
 
 ---
 
-*Last updated: July 2026 | Tested with ESP32 Core 3.x, Firebase-ESP-Client 4.4.x, Arduino IDE 2.3.x | Compatible with NodeMCU-32S, ESP32-S3, ESP32-C3*
+*Last updated: July 2026 | Tested with ESP32 Core 3.x, Firebase-ESP-Client 4.4.x, Arduino IDE 2.3.x | Compatible with ESP32 Dev Module, ESP32-S3, ESP32-C3*
