@@ -1,9 +1,9 @@
-# RPi Backend Setup Guide — Create Flask + ML Backend on Raspberry Pi
+# RPi Backend Setup Guide — Flask + ML + Firebase on Raspberry Pi
 
 > **Hardware:** Raspberry Pi 3B+/4/5  
 > **OS:** Raspberry Pi OS Trixie 64-bit (Debian 13)  
 > **Stack:** Flask + Pyrebase4 + XGBoost + Isolation Forest + systemd  
-> **Target:** Create all backend files from scratch
+> **Purpose:** Create all backend files from scratch for water meter leak detection
 
 ---
 
@@ -29,7 +29,7 @@
 - SSH access enabled (see [raspberry-pi-installation.md](./raspberry-pi-installation.md))
 - Firebase project created (see [firebase-setup-guide.md](./firebase-setup-guide.md))
 - ESP32 firmware uploaded and sending data (see [esp32-setup-guide.md](./esp32-setup-guide.md))
-- Internet connection on Pi
+- ML models trained (see [ml-complete-guide.md](./ml-complete-guide.md))
 
 ---
 
@@ -56,7 +56,7 @@ sudo systemctl start ssh
 ## Project Structure Creation
 
 ```bash
-# 1. Clone the project (or create structure manually)
+# 1. Clone or create project directory
 cd /home/pi
 git clone https://github.com/qppd/wmldad.git
 cd wmldad
@@ -87,42 +87,40 @@ python3 -m venv venv
 source venv/bin/activate
 
 # Upgrade pip
-pip install --upgrade pip
-
-# Verify venv active
-which python
-# Should show: /home/pi/wmldad/rpi/venv/bin/python
+pip install --upgrade pip setuptools wheel
 ```
 
 ### 2. Create requirements.txt
 
-Create `rpi/requirements.txt`:
-
 ```bash
 cat > requirements.txt << 'EOF'
-flask>=3.0
-pyrebase4>=4.5
-xgboost>=2.0
-scikit-learn>=1.3
-pandas>=2.0
-numpy>=1.24
-joblib>=1.3
-gunicorn>=21.0
-python-dotenv>=1.0
-requests>=2.31
+# ML Dependencies
+xgboost==2.0.3
+scikit-learn==1.3.2
+pandas==2.1.4
+numpy==1.24.3
+joblib==1.3.2
+
+# Web Dependencies
+flask==3.0.0
+pyrebase4==4.5.0
+gunicorn==21.2.0
+python-dotenv==1.0.0
+requests==2.31.0
 EOF
 ```
 
 ### 3. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
+# This takes 5-10 minutes on RPi (compiling xgboost/numpy from source)
+pip install --no-cache-dir -r requirements.txt
 
 # Verify key packages
-python -c "import flask, pyrebase, xgboost, sklearn, pandas, numpy; print('All packages OK')"
+python -c "import xgboost, sklearn, pandas, numpy, flask, pyrebase; print('All packages OK')"
 ```
 
-> **Note:** On Raspberry Pi (ARM64), `xgboost` and `numpy` compile from source — this may take 5-10 minutes. Use `pip install --no-cache-dir -r requirements.txt` if you have disk space constraints.
+> **Note:** On Raspberry Pi (ARM64), `xgboost` and `numpy` compile from source. This is normal and takes time.
 
 ---
 
@@ -161,7 +159,7 @@ EOF
 ```bash
 cat > .env << 'EOF'
 FIREBASE_EMAIL=esp32@your-project.iam.gserviceaccount.com
-FIREBASE_PASSWORD=your-strong-password
+FIREBASE_PASSWORD=your-strong-password-here
 DEVICE_ID=wm_001
 FLASK_HOST=0.0.0.0
 FLASK_PORT=5000
@@ -170,188 +168,227 @@ EOF
 
 > **Note:** The email/password must match a user created in Firebase Console → **Authentication** → **Sign-in method** → **Email/Password** → **Add user**.
 
----
-
-## Create Application Files
-
-### 1. Create `rpi/app.py` — Main Flask Application
+### 4. Verify Firebase Config
 
 ```bash
-cat > app.py << 'EOF'
-"""
-Water Meter Leak Detection — Flask Backend
-Runs on Raspberry Pi, polls Firebase, runs ML inference, serves dashboard.
-"""
-
-import os
-import json
-import logging
-from flask import Flask, render_template, jsonify, request
-from dotenv import load_dotenv
-
-# Load environment variables
-load_dotenv()
-
-# Local imports
-from firebase_listener import FirebaseListener
-from ml_inference import LeakDetector
-from alert_engine import AlertEngine
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
-
-# Flask app
-app = Flask(__name__)
-
-# Configuration from environment
-FIREBASE_CONFIG_PATH = os.getenv('FIREBASE_CONFIG_PATH', 'firebase_config.json')
-FIREBASE_EMAIL = os.getenv('FIREBASE_EMAIL')
-FIREBASE_PASSWORD = os.getenv('FIREBASE_PASSWORD')
-DEVICE_ID = os.getenv('DEVICE_ID', 'wm_001')
-
-# ML model paths
-XGB_PATH = 'models/xgboost_leak_model.json'
-IFOREST_PATH = 'models/isolation_forest.pkl'
-SCALER_PATH = 'models/scaler.pkl'
-
-# Global components
-firebase_listener = None
-detector = None
-alert_engine = None
-
-
-def initialize_components():
-    """Initialize all backend components."""
-    global firebase_listener, detector, alert_engine
-    
-    logger.info("Initializing ML detector...")
-    detector = LeakDetector(
-        xgb_path=XGB_PATH,
-        iforest_path=IFOREST_PATH,
-        scaler_path=SCALER_PATH
-    )
-    detector.warm_up()
-    
-    logger.info("Initializing alert engine...")
-    alert_engine = AlertEngine()
-    
-    logger.info("Initializing Firebase listener...")
-    firebase_listener = FirebaseListener(
-        config_path=FIREBASE_CONFIG_PATH,
-        email=FIREBASE_EMAIL,
-        password=FIREBASE_PASSWORD,
-        device_id=DEVICE_ID,
-        poll_interval=5
-    )
-    firebase_listener.set_detector(detector)
-    firebase_listener.set_alert_engine(alert_engine)
-    firebase_listener.start()
-    
-    logger.info("All components initialized successfully")
-
-
-# Initialize on startup
-initialize_components()
-
-
-# ==================== ROUTES ====================
-
-@app.route('/')
-def dashboard():
-    """Main dashboard page."""
-    return render_template('dashboard.html')
-
-
-@app.route('/api/health')
-def health():
-    """Health check endpoint."""
-    return jsonify({
-        'status': 'healthy',
-        'firebase_connected': firebase_listener.is_connected() if firebase_listener else False,
-        'model_loaded': detector.model_loaded if detector else False,
-        'device_id': DEVICE_ID
-    })
-
-
-@app.route('/api/latest')
-def api_latest():
-    """Get latest sensor reading from Firebase."""
-    if not firebase_listener:
-        return jsonify({'error': 'Firebase listener not initialized'}), 503
-    
-    latest = firebase_listener.get_latest_reading()
-    return jsonify(latest) if latest else jsonify({})
-
-
-@app.route('/api/alerts')
-def api_alerts():
-    """Get recent alerts from Firebase."""
-    if not firebase_listener:
-        return jsonify({'error': 'Firebase listener not initialized'}), 503
-    
-    alerts = firebase_listener.get_recent_alerts(limit=50)
-    return jsonify(alerts) if alerts else jsonify({})
-
-
-@app.route('/api/predict', methods=['POST'])
-def api_predict():
-    """Run ML inference on provided features."""
-    if not detector or not detector.model_loaded:
-        return jsonify({'error': 'ML model not loaded'}), 503
-    
-    data = request.get_json()
-    if not data or 'features' not in data:
-        return jsonify({'error': 'Missing features in request'}), 400
-    
-    try:
-        import numpy as np
-        features = np.array(data['features'], dtype=np.float32).reshape(1, -1)
-        result = detector.predict(features)
-        return jsonify(result)
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/command', methods=['POST'])
-def api_command():
-    """Send command to ESP32 via Firebase."""
-    if not firebase_listener:
-        return jsonify({'error': 'Firebase listener not initialized'}), 503
-    
-    data = request.get_json()
-    if not data or 'command' not in data:
-        return jsonify({'error': 'Missing command'}), 400
-    
-    try:
-        firebase_listener.send_command(data['command'])
-        return jsonify({'status': 'sent', 'command': data['command']})
-    except Exception as e:
-        logger.error(f"Command send error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-# ==================== MAIN ====================
-
-if __name__ == '__main__':
-    port = int(os.getenv('FLASK_PORT', 5000))
-    host = os.getenv('FLASK_HOST', '0.0.0.0')
-    
-    logger.info(f"Starting Flask on {host}:{port}")
-    app.run(host=host, port=port, debug=False, threaded=True)
-EOF
+python3 -c "
+import json, os
+with open('firebase_config.json') as f:
+    config = json.load(f)
+print('Firebase config loaded:')
+for k, v in config.items():
+    print(f'  {k}: {v[:20]}...' if len(v) > 20 else f'  {k}: {v}')
+"
 ```
 
 ---
 
-### 2. Create `rpi/firebase_listener.py` — Pyrebase4 Polling
+## Create Application Files
+
+### 1. Create ml_inference.py (XGBoost + Isolation Forest)
 
 ```bash
-cat > firebase_listener.py << 'EOF'
+cat > ml_inference.py << 'PYEOF'
+"""
+ML Inference — XGBoost + Isolation Forest
+Production leak detector for Raspberry Pi.
+"""
+
+import xgboost as xgb
+import joblib
+import numpy as np
+import logging
+from pathlib import Path
+from typing import Dict, Any, Union, List
+
+logger = logging.getLogger(__name__)
+
+
+class LeakDetector:
+    """Production leak detector combining XGBoost + Isolation Forest."""
+    
+    def __init__(
+        self,
+        xgb_path: str = 'models/xgboost_model.json',
+        iforest_path: str = 'models/isolation_forest.pkl',
+        scaler_path: str = 'models/scaler.pkl',
+        threshold_path: str = 'models/iso_threshold.pkl',
+        feature_cols_path: str = 'models/feature_cols.pkl',
+        confidence_threshold: float = 0.80
+    ):
+        self.xgb_path = Path(xgb_path)
+        self.iforest_path = Path(iforest_path)
+        self.scaler_path = Path(scaler_path)
+        self.threshold_path = Path(threshold_path)
+        self.feature_cols_path = Path(feature_cols_path)
+        self.confidence_threshold = confidence_threshold
+        
+        self.model_loaded = False
+        self.n_features = 9
+        self.target_names = ['normal', 'minor_leak', 'major_leak']
+        self.inference_count = 0
+        
+        self._load_models()
+    
+    def _load_models(self):
+        """Load all model artifacts"""
+        try:
+            # XGBoost
+            self.xgb = xgb.XGBClassifier()
+            self.xgb.load_model(str(self.xgb_path))
+            
+            # Isolation Forest
+            self.iso_forest = joblib.load(self.iforest_path)
+            
+            # Scaler
+            self.scaler = joblib.load(self.scaler_path)
+            
+            # Threshold
+            self.iso_threshold = joblib.load(self.threshold_path)
+            
+            # Feature columns
+            self.feature_cols = joblib.load(self.feature_cols_path)
+            self.n_features = len(self.feature_cols)
+            
+            self.model_loaded = True
+            logger.info("✅ All models loaded successfully")
+            logger.info(f"   XGBoost: {self.xgb.n_estimators} trees, {self.n_features} features")
+            logger.info(f"   Isolation Forest: {self.iso_forest.n_estimators} estimators")
+            logger.info(f"   Threshold: {self.iso_threshold:.4f}")
+            
+        except Exception as e:
+            logger.error(f"❌ Model loading failed: {e}")
+            self.model_loaded = False
+            raise
+    
+    def predict(self, features_raw: Union[np.ndarray, List]) -> Dict[str, Any]:
+        """Run inference on raw features."""
+        if not self.model_loaded:
+            raise RuntimeError("Models not loaded")
+        
+        # Ensure 2D array
+        features = np.asarray(features_raw, dtype=np.float32)
+        if features.ndim == 1:
+            features = features.reshape(1, -1)
+        
+        # Validate feature count
+        if features.shape[1] != self.n_features:
+            raise ValueError(f"Expected {self.n_features} features, got {features.shape[1]}")
+        
+        # Scale
+        features_scaled = self.scaler.transform(features)
+        
+        results = []
+        
+        for i in range(features_scaled.shape[0]):
+            sample = features_scaled[i:i+1]
+            
+            # 1. XGBoost inference
+            xgb_proba = self.xgb.predict_proba(sample)[0]
+            xgb_pred = int(np.argmax(xgb_proba))
+            xgb_conf = float(xgb_proba[xgb_pred])
+            
+            # 2. Isolation Forest
+            iso_score = float(self.iso_forest.score_samples(sample)[0])
+            iso_anomaly = bool(iso_score < self.iso_threshold)
+            
+            # Build result
+            result = {
+                'xgboost': {
+                    'class': self.target_names[xgb_pred],
+                    'confidence': xgb_conf,
+                    'probabilities': {
+                        name: float(xgb_proba[j]) 
+                        for j, name in enumerate(self.target_names)
+                    }
+                },
+                'isolation_forest': {
+                    'anomaly': iso_anomaly,
+                    'score': iso_score
+                }
+            }
+            
+            # Decision logic
+            if xgb_conf >= self.confidence_threshold:
+                result['final'] = result['xgboost']['class']
+                result['confidence'] = xgb_conf
+            elif iso_anomaly:
+                result['final'] = 'anomaly'
+                result['confidence'] = float(1.0 - abs(iso_score))
+            else:
+                result['final'] = 'uncertain'
+                result['confidence'] = xgb_conf
+            
+            results.append(result)
+        
+        self.inference_count += 1
+        
+        # Periodic garbage collection
+        if self.inference_count % 1000 == 0:
+            import gc
+            gc.collect()
+        
+        return results[0] if len(results) == 1 else results
+    
+    def warm_up(self, n_warmup: int = 10):
+        """Run dummy inferences to warm up."""
+        dummy = np.zeros((1, self.n_features), dtype=np.float32)
+        for _ in range(n_warmup):
+            _ = self.predict(dummy)
+        logger.info(f"🔥 Warm-up complete ({n_warmup} iterations)")
+    
+    def benchmark(self, n_iterations: int = 100) -> Dict[str, float]:
+        """Benchmark inference speed."""
+        import time
+        
+        dummy = np.zeros((1, self.n_features), dtype=np.float32)
+        
+        # Warm up
+        self.warm_up(10)
+        
+        # Benchmark
+        start = time.perf_counter()
+        for _ in range(n_iterations):
+            _ = self.predict(dummy)
+        elapsed = time.perf_counter() - start
+        
+        return {
+            'total_time_ms': elapsed * 1000,
+            'avg_time_ms': (elapsed / n_iterations) * 1000,
+            'iterations': n_iterations,
+            'throughput_fps': n_iterations / elapsed
+        }
+
+
+def load_deployment_package(model_dir: str = 'models') -> Dict[str, Any]:
+    """Load complete deployment package from directory."""
+    model_dir = Path(model_dir)
+    
+    detector = LeakDetector(
+        xgb_path=model_dir / 'xgboost_model.json',
+        iforest_path=model_dir / 'isolation_forest.pkl',
+        scaler_path=model_dir / 'scaler.pkl',
+        threshold_path=model_dir / 'iso_threshold.pkl',
+        feature_cols_path=model_dir / 'feature_cols.pkl'
+    )
+    
+    import json
+    with open(model_dir / 'metadata.json') as f:
+        metadata = json.load(f)
+    
+    return {
+        'detector': detector,
+        'metadata': metadata
+    }
+PYEOF
+```
+
+---
+
+### 2. Create firebase_listener.py (Pyrebase4 Polling)
+
+```bash
+cat > firebase_listener.py << 'PYEOF'
 """
 Firebase Listener — Polls Firebase Realtime DB for new sensor readings
 using Pyrebase4 (Email/Password auth).
@@ -500,7 +537,7 @@ class FirebaseListener:
             logger.error(f"Error processing reading: {e}")
     
     def _extract_features(self, data: Dict, fixture_idx: int, fixture: Dict, inlet: Dict):
-        """Extract 9 features from raw sensor data."""
+        """Extract 9 features from raw Firebase data."""
         import numpy as np
         from datetime import datetime
         
@@ -508,7 +545,7 @@ class FirebaseListener:
         volume = fixture.get('volume', 0)
         inlet_rate = inlet.get('flow_rate', 0)
         
-        # 1. Flow rate (L/min)
+        # 1. Flow rate
         # 2. Duration (approximate from volume/rate)
         duration = volume / max(flow_rate / 60, 0.01) if flow_rate > 0 else 0
         
@@ -560,7 +597,7 @@ class FirebaseListener:
         
         try:
             self.alerts_ref.push(alert_data, self.id_token)
-            logger.warning(f"ALERT: {result['final']} on fixture {fixture_idx} (conf: {result.get('confidence', 0):.2f})")
+            logger.warning(f"⚠️ ALERT: {result['final']} on fixture {fixture_idx} (conf: {result.get('confidence', 0):.2f})")
             
             # Send notification
             if self._alert_engine:
@@ -579,7 +616,7 @@ class FirebaseListener:
         return alerts.val() if alerts else None
     
     def send_command(self, command: str):
-        """Send command to ESP32 via Firebase /commands."""
+        """Send command to ESP32 via Firebase."""
         self.commands_ref.push({
             'command': command,
             'timestamp': datetime.utcnow().isoformat() + 'Z',
@@ -593,112 +630,23 @@ class FirebaseListener:
             return True
         except:
             return False
-EOF
+    
+    def reconnect(self):
+        """Force reconnection."""
+        logger.info("Reconnecting to Firebase...")
+        self._sign_in()
+PYEOF
 ```
 
 ---
 
-### 3. Create `rpi/ml_inference.py` — XGBoost + Isolation Forest
+### 3. Create alert_engine.py (In-App Notifications)
 
 ```bash
-cat > ml_inference.py << 'EOF'
-"""
-ML Inference — XGBoost Classifier + Isolation Forest Anomaly Detection
-"""
-
-import xgboost as xgb
-import joblib
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-
-
-class LeakDetector:
-    """Combined XGBoost + Isolation Forest leak detector."""
-    
-    def __init__(
-        self,
-        xgb_path: str,
-        iforest_path: str,
-        scaler_path: str,
-        threshold_path: str = None
-    ):
-        self.xgb = xgb.XGBClassifier()
-        self.xgb.load_model(xgb_path)
-        self.iforest = joblib.load(iforest_path)
-        self.scaler = joblib.load(scaler_path)
-        self.confidence_threshold = 0.80
-        self.model_loaded = True
-        self.n_features = 9
-        
-        logger.info("ML models loaded successfully")
-    
-    def warm_up(self):
-        """Run a dummy prediction to warm up models."""
-        dummy = np.zeros((1, self.n_features), dtype=np.float32)
-        try:
-            self.predict(dummy)
-            logger.info("Models warmed up")
-        except Exception as e:
-            logger.error(f"Warm-up failed: {e}")
-    
-    def predict(self, features_raw: np.ndarray) -> Dict:
-        """
-        Run inference on raw features (1x9 array).
-        Returns combined XGBoost + Isolation Forest result.
-        """
-        # Scale features
-        features = self.scaler.transform(features_raw.reshape(1, -1))
-        
-        # 1. XGBoost prediction
-        xgb_probs = self.xgb.predict_proba(features)[0]
-        xgb_class = int(np.argmax(xgb_probs))
-        xgb_confidence = float(xgb_probs[xgb_class])
-        
-        class_names = ['normal', 'minor_leak', 'major_leak']
-        
-        # 2. Isolation Forest anomaly score
-        iforest_score = float(self.iforest.score_samples(features)[0])
-        is_anomaly = bool(self.iforest.predict(features)[0] == -1)
-        
-        result = {
-            'xgboost': {
-                'class': class_names[xgb_class],
-                'confidence': xgb_confidence,
-                'probabilities': {
-                    'normal': float(xgb_probs[0]),
-                    'minor_leak': float(xgb_probs[1]),
-                    'major_leak': float(xgb_probs[2])
-                }
-            },
-            'isolation_forest': {
-                'anomaly': is_anomaly,
-                'score': iforest_score
-            }
-        }
-        
-        # Decision logic
-        if xgb_confidence >= self.confidence_threshold:
-            result['final'] = result['xgboost']['class']
-        elif is_anomaly:
-            result['final'] = 'anomaly'
-        else:
-            result['final'] = 'uncertain'
-        
-        return result
-EOF
-```
-
----
-
-### 4. Create `rpi/alert_engine.py` — In-App Notifications
-
-```bash
-cat > alert_engine.py << 'EOF'
+cat > alert_engine.py << 'PYEOF'
 """
 Alert Engine — In-app notifications via Firebase /alerts
-The web dashboard polls /alerts and displays alerts in real-time.
+The web dashboard polls /api/alerts and displays alerts in real-time.
 """
 
 import logging
@@ -733,21 +681,251 @@ class AlertEngine:
     def _send_webhook(self, alert_data: Dict):
         """Optional: send to external webhook."""
         pass
-EOF
+PYEOF
 ```
 
 ---
 
-### 5. Create `rpi/templates/dashboard.html` — Main Dashboard
+### 4. Create app.py (Flask Entry Point)
 
 ```bash
-cat > templates/dashboard.html << 'EOF'
+cat > app.py << 'PYEOF'
+"""
+Water Meter Leak Detection — Flask Backend
+Runs on Raspberry Pi, polls Firebase, runs ML inference, serves dashboard.
+"""
+
+import os
+import logging
+from flask import Flask, render_template, jsonify, request
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Local imports
+from firebase_listener import FirebaseListener
+from ml_inference import load_deployment_package
+from alert_engine import AlertEngine
+from api_endpoints import api
+
+# Flask app
+app = Flask(__name__)
+app.register_blueprint(api)
+
+# Configuration from environment
+FIREBASE_CONFIG_PATH = os.getenv('FIREBASE_CONFIG_PATH', 'firebase_config.json')
+FIREBASE_EMAIL = os.getenv('FIREBASE_EMAIL')
+FIREBASE_PASSWORD = os.getenv('FIREBASE_PASSWORD')
+DEVICE_ID = os.getenv('DEVICE_ID', 'wm_001')
+
+# Global components
+firebase_listener = None
+detector = None
+alert_engine = None
+
+
+def initialize_components():
+    """Initialize all backend components."""
+    global firebase_listener, detector, alert_engine
+    
+    logger.info("Initializing ML detector...")
+    package = load_deployment_package('models')
+    detector = package['detector']
+    detector.warm_up()
+    
+    # Log metadata
+    metadata = package['metadata']
+    logger.info(f"Model version: {metadata.get('version', 'unknown')}")
+    logger.info(f"Created: {metadata.get('created', 'unknown')}")
+    logger.info(f"Performance: {metadata.get('performance', {})}")
+    
+    logger.info("Initializing alert engine...")
+    alert_engine = AlertEngine()
+    
+    logger.info("Initializing Firebase listener...")
+    firebase_listener = FirebaseListener(
+        config_path=FIREBASE_CONFIG_PATH,
+        email=FIREBASE_EMAIL,
+        password=FIREBASE_PASSWORD,
+        device_id=DEVICE_ID,
+        poll_interval=5
+    )
+    firebase_listener.set_detector(detector)
+    firebase_listener.set_alert_engine(alert_engine)
+    firebase_listener.start()
+    
+    logger.info("✅ All components initialized")
+
+
+# Initialize on startup
+initialize_components()
+
+
+# ==================== ROUTES ====================
+
+@app.route('/')
+def dashboard():
+    """Main dashboard page."""
+    return render_template('dashboard.html')
+
+
+@app.route('/api/health')
+def health():
+    """Health check endpoint."""
+    return jsonify({
+        'status': 'healthy',
+        'firebase_connected': firebase_listener.is_connected() if firebase_listener else False,
+        'model_loaded': detector.model_loaded if detector else False,
+        'device_id': DEVICE_ID
+    })
+
+
+@app.route('/api/latest')
+def api_latest():
+    """Get latest sensor reading."""
+    if not firebase_listener:
+        return jsonify({'error': 'Firebase listener not initialized'}), 503
+    
+    latest = firebase_listener.get_latest_reading()
+    return jsonify(latest) if latest else jsonify({})
+
+
+@app.route('/api/alerts')
+def api_alerts():
+    """Get recent alerts."""
+    if not firebase_listener:
+        return jsonify({'error': 'Firebase listener not initialized'}), 503
+    
+    alerts = firebase_listener.get_recent_alerts(limit=50)
+    return jsonify(alerts) if alerts else jsonify({})
+
+
+@app.route('/api/command', methods=['POST'])
+def api_command():
+    """Send command to ESP32 via Firebase."""
+    if not firebase_listener:
+        return jsonify({'error': 'Firebase listener not initialized'}), 503
+    
+    data = request.get_json()
+    if not data or 'command' not in data:
+        return jsonify({'error': 'Missing command'}), 400
+    
+    try:
+        firebase_listener.send_command(data['command'])
+        return jsonify({'status': 'sent', 'command': data['command']})
+    except Exception as e:
+        logger.error(f"Command send error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/benchmark')
+def benchmark():
+    """Run inference benchmark."""
+    if not detector:
+        return jsonify({'error': 'Detector not initialized'}), 503
+    
+    return jsonify(detector.benchmark(100))
+
+
+# ==================== MAIN ====================
+
+if __name__ == '__main__':
+    port = int(os.getenv('FLASK_PORT', 5000))
+    host = os.getenv('FLASK_HOST', '0.0.0.0')
+    
+    logger.info(f"Starting Flask on {host}:{port}")
+    app.run(host=host, port=port, debug=False, threaded=True)
+PYEOF
+```
+
+---
+
+### 5. Create api_endpoints.py (API Blueprint)
+
+```bash
+cat > api_endpoints.py << 'PYEOF'
+"""
+API Endpoints Blueprint — Separated for modularity.
+"""
+
+from flask import Blueprint, request, jsonify
+import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
+api = Blueprint('api', __name__)
+
+
+def get_detector():
+    """Get detector instance from app context."""
+    from app import detector
+    return detector
+
+
+@api.route('/api/predict', methods=['POST'])
+def predict():
+    """Single prediction endpoint."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'No JSON data'}), 400
+        
+        features = extract_features_from_request(data)
+        
+        detector = get_detector()
+        result = detector.predict(features)
+        
+        return jsonify(result)
+    
+    except Exception as e:
+        logger.error(f"Prediction error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+def extract_features_from_request(data: dict) -> np.ndarray:
+    """Extract 9 features from request data."""
+    # If features already provided
+    if 'features' in data:
+        return np.array(data['features'], dtype=np.float32)
+    
+    # Otherwise build from raw Firebase reading
+    inlet = data.get('inlet', {})
+    fixture = data.get('fixture', {})
+    
+    return np.array([[
+        fixture.get('flow_rate', 0),
+        fixture.get('duration', 0),
+        data.get('hour', 12),
+        data.get('day', 0),
+        data.get('fixture_id', 1),
+        inlet.get('flow_rate', 0) / max(fixture.get('flow_rate', 0.01), 0.01),
+        0,  # rate_variance
+        1 if data.get('hour', 12) >= 22 or data.get('hour', 12) < 5 else 0,
+        0   # pulse_trend
+    ]], dtype=np.float32)
+PYEOF
+```
+
+---
+
+### 6. Create templates/dashboard.html
+
+```bash
+cat > templates/dashboard.html << 'HTMLEOF'
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Water Meter Dashboard</title>
+    <title>Water Meter Monitor</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4"></script>
@@ -809,7 +987,7 @@ cat > templates/dashboard.html << 'EOF'
             </div>
         </div>
         
-        <!-- Charts Row -->
+        <!-- Charts & Status -->
         <div class="row mb-3">
             <div class="col-md-8">
                 <div class="card">
@@ -882,15 +1060,15 @@ cat > templates/dashboard.html << 'EOF'
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>
-EOF
+HTMLEOF
 ```
 
 ---
 
-### 6. Create `rpi/static/css/dashboard.css`
+### 7. Create static/css/dashboard.css
 
 ```bash
-cat > static/css/dashboard.css << 'EOF'
+cat > static/css/dashboard.css << 'CSSEOF'
 /* Water Meter Dashboard Styles */
 
 .sensor-card {
@@ -936,15 +1114,15 @@ cat > static/css/dashboard.css << 'EOF'
     .sensor-value { font-size: 1.2rem; }
     .card-header { font-size: 0.9rem; }
 }
-EOF
+CSSEOF
 ```
 
 ---
 
-### 7. Create `rpi/static/js/dashboard.js`
+### 8. Create static/js/dashboard.js
 
 ```bash
-cat > static/js/dashboard.js << 'EOF'
+cat > static/js/dashboard.js << 'JSEOF'
 // Water Meter Dashboard JavaScript
 
 let flowChart = null;
@@ -1012,9 +1190,7 @@ async function loadLatest() {
 }
 
 function updateDashboard(data) {
-    // Update last update time
-    document.getElementById('last-update').textContent = 
-        `Last update: ${new Date().toLocaleTimeString()}`;
+    document.getElementById('last-update').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
     
     // Inlet
     const inlet = data.inlet || {};
@@ -1036,7 +1212,6 @@ function updateChart(inlet, data) {
     const now = new Date().toLocaleTimeString();
     const maxPoints = 50;
     
-    // Add new data point
     flowChart.data.labels.push(now);
     flowChart.data.datasets[0].data.push(inlet.flow_rate || 0);
     
@@ -1117,7 +1292,6 @@ async function sendCommand(command) {
 }
 
 function startAutoRefresh() {
-    // Refresh every 5 seconds
     updateInterval = setInterval(() => {
         loadLatest();
         loadAlerts();
@@ -1128,60 +1302,77 @@ function startAutoRefresh() {
 window.addEventListener('beforeunload', () => {
     if (updateInterval) clearInterval(updateInterval);
 });
-EOF
+JSEOF
 ```
 
 ---
 
 ## ML Model Files
 
-### If you have trained models (from Google Colab/Jupyter):
+### If you have trained models (from Colab/local):
 
 ```bash
-# Copy from your training environment to rpi/models/
-# Required files:
-cp xgboost_leak_model.json rpi/models/
-cp isolation_forest.pkl rpi/models/
-cp scaler.pkl rpi/models/
+# Copy from training machine to RPi
+scp -r models/ pi@water-meter.local:~/wmldad/rpi/models/
 
 # Verify
-ls -la rpi/models/
+ls -la ~/wmldad/rpi/models/
+# xgboost_model.json  isolation_forest.pkl  scaler.pkl  iso_threshold.pkl  feature_cols.pkl  metadata.json
 ```
 
 ### If you DON'T have trained models yet:
 
-The system will work with local ESP32 rules (inlet balance, continuous flow, drip detection). ML can be added later.
+Create placeholder models for testing:
 
 ```bash
-# Create placeholder models (for testing dashboard only)
-cd rpi/models
-python3 -c "
+cd ~/wmldad/rpi
+
+python3 << 'PYEOF'
 import xgboost as xgb
 import numpy as np
 from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import RobustScaler
 import joblib
 
 # Dummy XGBoost
 xgb_model = xgb.XGBClassifier()
 xgb_model.fit(np.random.rand(100, 9), np.random.randint(0, 3, 100))
-xgb_model.save_model('xgboost_leak_model.json')
+xgb_model.save_model('models/xgboost_model.json')
 
 # Dummy Isolation Forest
-iforest = IsolationForest(contamination=0.05)
+iforest = IsolationForest(contamination=0.05, random_state=42)
 iforest.fit(np.random.rand(100, 9))
-joblib.dump(iforest, 'isolation_forest.pkl')
+joblib.dump(iforest, 'models/isolation_forest.pkl')
 
 # Dummy Scaler
-scaler = StandardScaler()
+scaler = RobustScaler()
 scaler.fit(np.random.rand(100, 9))
-joblib.dump(scaler, 'scaler.pkl')
+joblib.dump(scaler, 'models/scaler.pkl')
 
-print('Placeholder models created')
-"
+# Dummy Threshold
+joblib.dump(-0.5, 'models/iso_threshold.pkl')
+
+# Feature columns
+feature_cols = ['flow_rate', 'duration', 'hour', 'day', 'fixture_id',
+                'inlet_ratio', 'rate_variance', 'is_night', 'pulse_trend']
+joblib.dump(feature_cols, 'models/feature_cols.pkl')
+
+# Metadata
+import json
+with open('models/metadata.json', 'w') as f:
+    json.dump({
+        'version': '1.0-placeholder',
+        'created': '2026-07-14T00:00:00Z',
+        'feature_cols': feature_cols,
+        'target_names': ['normal', 'minor_leak', 'major_leak'],
+        'note': 'PLACEHOLDER - Replace with real trained models'
+    }, f, indent=2)
+
+print("Placeholder models created")
+PYEOF
 ```
 
-> ⚠️ **Important:** Replace with real trained models from [ml-training-guide.md](./ml-training-guide.md) for production use.
+> ⚠️ **Important:** Replace with real trained models from [ml-complete-guide.md](./ml-complete-guide.md) for production use.
 
 ---
 
@@ -1190,7 +1381,7 @@ print('Placeholder models created')
 ### 1. Create Service File
 
 ```bash
-sudo tee /etc/systemd/system/water-meter.service > /dev/null <<'EOF'
+sudo tee /etc/systemd/system/water-meter.service > /dev/null << 'EOF'
 [Unit]
 Description=Water Meter Leak Detection Backend
 After=network.target
@@ -1239,9 +1430,17 @@ journalctl -u water-meter.service -f
 | Setting | Value |
 |---------|-------|
 | External Port | 8443 |
-| Internal IP | Raspberry Pi LAN IP |
+| Internal IP | Raspberry Pi LAN IP (e.g., 192.168.1.100) |
 | Internal Port | 5000 |
 | Protocol | TCP |
+
+**DuckDNS (Free):**
+```bash
+# Create account at duckdns.org
+# Add cron for auto-update:
+crontab -e
+# */5 * * * * curl "https://www.duckdns.org/update?domains=yourdomain&token=yourtoken&ip="
+```
 
 ### Cloudflare Tunnel (Recommended - Free HTTPS)
 
@@ -1263,45 +1462,60 @@ cloudflared tunnel route dns water-meter yourdomain.com
 sudo cloudflared service install
 ```
 
+**Access URLs:**
+- Local: `http://<rpi-ip>:5000/`
+- Remote (Port Forward): `http://<public-ip>:8443/`
+- Remote (DDNS): `http://yourdomain.duckdns.org:8443/`
+- Remote (Cloudflare): `https://yourdomain.com/`
+
 ---
 
 ## Verification & Testing
 
-### 1. Test Flask App Manually First
+### 1. Health Check
 
 ```bash
-cd /home/pi/wmldad/rpi
-source venv/bin/activate
-python app.py
-# Visit http://<rpi-ip>:5000/
-```
-
-### 2. Verify Endpoints
-
-```bash
-# Health check
 curl http://localhost:5000/api/health
-
-# Latest reading
-curl http://localhost:5000/api/latest
-
-# Alerts
-curl http://localhost:5000/api/alerts
+# {"status":"healthy","firebase_connected":true,"model_loaded":true,"device_id":"wm_001"}
 ```
 
-### 3. Check Dashboard Loads
+### 2. Dashboard
 
-- Open browser to `http://<rpi-ip>:5000/`
-- Should show flow rate cards, chart, alerts table
-- Firebase status badge should be green
-- ML status badge should be green
+Open browser: `http://<rpi-ip>:5000/`
 
-### 4. Test ESP32 → Firebase → RPi Flow
+Verify:
+- ✅ Flow rate cards update every 5 seconds
+- ✅ Chart shows live data
+- ✅ Alerts table populates
+- ✅ Calibrate/Reboot buttons work
 
-1. Run water through sensors
-2. Check Firebase Console → `/readings/wm_001/` updates every 5s
-3. RPi dashboard shows live flow rates
-4. Simulate leak (slow drip) → alert appears in dashboard
+### 3. API Test
+
+```bash
+# Benchmark inference
+curl http://localhost:5000/api/benchmark
+# {"avg_time_ms": 2.3, "throughput_fps": 430, ...}
+
+# Test prediction
+curl -X POST http://localhost:5000/api/predict \
+  -H "Content-Type: application/json" \
+  -d '{"features": [[5.0, 120, 14, 2, 1, 1.05, 0.1, 0, 0.1]]}'
+```
+
+### 4. Verify Firebase Data Flow
+
+1. Open Firebase Console → Realtime Database
+2. Check `/readings/wm_001/` — new data every 5 seconds
+3. Check `/alerts/wm_001/` — alerts appear when leaks detected
+4. Check `/commands/wm_001/` — commands sent from dashboard
+
+### 5. Test ESP32 Communication
+
+```bash
+# On RPi, monitor serial (if USB connected for testing)
+screen /dev/ttyUSB0 115200
+# Should see JSON lines every 5 seconds
+```
 
 ---
 
@@ -1310,14 +1524,14 @@ curl http://localhost:5000/api/alerts
 | Problem | Solution |
 |---------|----------|
 | **App not loading** | Check Flask output: `journalctl -u water-meter.service -f` |
-| **"Internal Server Error"** | View logs: `sudo journalctl -u water-meter.service --since "5 min ago"` |
+| **"Internal Server Error"** | View Flask error log: `sudo journalctl -u water-meter.service --since "5 min ago"` |
 | **Module not found** | Activate venv → `pip install -r requirements.txt` |
-| **Memory error** | RPi 4 has 2-8GB — reduce `n_estimators` in XGBoost if needed |
-| **RPi not reachable** | Check network: `ping <rpi-ip>`. Ensure port 5000 not blocked by firewall |
-| **Auto-start fails** | Check systemd: `sudo systemctl status water-meter.service` |
-| **Firebase auth fails** | Verify email/password in `.env` matches Firebase Auth user |
-| **No data in dashboard** | Check ESP32 serial: `screen /dev/ttyESP32 115200` — verify JSON output |
-| **ML model not loaded** | Ensure `models/*.json`, `*.pkl` exist in `rpi/models/` |
+| **Memory error** | RPi 4 has 2-8GB RAM — check `free -h`. Reduce `n_estimators` in XGBoost. |
+| **RPi not reachable** | Check network: `ping <rpi-ip>`. Ensure port 5000 not blocked by firewall. |
+| **RPi auto-start not working** | Check systemd: `sudo systemctl status water-meter.service` |
+| **SD card corruption** | Use UPS and `sudo raspi-config` → Performance → Overlay File System for read-only root |
+| **Firebase permission denied** | Check Security Rules in Firebase Console. Verify email/password user exists. |
+| **esptool.py not found** | `pip3 install esptool` |
 
 ---
 
@@ -1327,10 +1541,8 @@ curl http://localhost:5000/api/alerts
 # Backup models
 tar -czf models_backup_$(date +%Y%m%d).tar.gz models/
 
-# Backup Firebase data (requires firebase-tools)
-npm install -g firebase-tools
-firebase login
-firebase database:get /readings > backup_readings_$(date +%Y%m%d).json
+# Backup Firebase data (via CLI)
+firebase database:get /readings > backup_readings.json
 
 # Check disk space
 df -h
@@ -1341,7 +1553,39 @@ sudo apt update && sudo apt upgrade -y
 
 ---
 
-## Quick Reference
+## Complete File Checklist
+
+After this guide, your `rpi/` should contain:
+
+```
+rpi/
+├── app.py                      # Flask entry point
+├── firebase_listener.py        # Pyrebase4 polling
+├── ml_inference.py             # XGBoost + IF inference
+├── alert_engine.py             # Notifications
+├── api_endpoints.py            # REST API blueprint
+├── models/                     # ML artifacts
+│   ├── xgboost_model.json
+│   ├── isolation_forest.pkl
+│   ├── scaler.pkl
+│   ├── iso_threshold.pkl
+│   ├── feature_cols.pkl
+│   └── metadata.json
+├── templates/
+│   └── dashboard.html          # Bootstrap + Chart.js
+├── static/
+│   ├── css/dashboard.css
+│   └── js/dashboard.js
+├── requirements.txt
+├── firebase_config.json        # Gitignored
+├── .env                        # Gitignored
+├── water-meter.service         # systemd (copy to /etc/systemd/system/)
+├── venv/                       # Virtual environment
+```
+
+---
+
+## Quick Reference Commands
 
 | Task | Command |
 |------|---------|
@@ -1349,10 +1593,13 @@ sudo apt update && sudo apt upgrade -y
 | Stop service | `sudo systemctl stop water-meter.service` |
 | Restart service | `sudo systemctl restart water-meter.service` |
 | View logs | `journalctl -u water-meter.service -f` |
-| Manual run | `cd rpi && source venv/bin/activate && python app.py` |
-| Update deps | `cd rpi && source venv/bin/activate && pip install -r requirements.txt` |
-| Check port | `netstat -tlnp | grep 5000` |
+| Run manually | `cd ~/wmldad/rpi && source venv/bin/activate && python app.py` |
+| Install deps | `cd ~/wmldad/rpi && source venv/bin/activate && pip install -r requirements.txt` |
+| Copy models | `scp -r models/ pi@water-meter.local:~/wmldad/rpi/` |
+| Benchmark | `curl http://localhost:5000/api/benchmark` |
+| Health check | `curl http://localhost:5000/api/health` |
+| Manual retrain | `cd ~/wmldad/rpi && source venv/bin/activate && python retrain.py` |
 
 ---
 
-*Last updated: July 2026 | Raspberry Pi OS Trixie 64-bit | Flask 3.x + Pyrebase4 + XGBoost 2.x*
+*Last updated: July 2026 | Target: Raspberry Pi OS Trixie 64-bit | Flask 3.x + XGBoost 2.x + Pyrebase4 | Compatible with Pi 3B+/4/5*
