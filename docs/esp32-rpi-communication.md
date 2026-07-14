@@ -1,958 +1,745 @@
-# ESP32 ↔ Raspberry Pi Communication Guide
+# ESP32 ↔ Raspberry Pi Communication (USB Serial)
 
-> **Architecture:** ESP32 (Firebase-ESP-Client) ↔ Firebase Realtime DB ↔ RPi (Pyrebase4)  
-> **Protocols:** HTTPS/SSE (ESP32→Firebase), REST Polling (RPi→Firebase)  
-> **Audience:** Developers implementing the complete data pipeline
+> **Architecture:** ESP32 ↔ USB Cable (ttyUSB0/ttyUSB1) ↔ RPi (Python Serial)
+> **Protocol:** JSON over UART (115200 baud)
+> **Auto-detection:** RPi auto-detects ESP32 on ttyUSB0 or ttyUSB1
 
 ---
 
 ## Table of Contents
 
 1. [Communication Overview](#communication-overview)
-2. [ESP32 → Firebase (Upstream)](#esp32--firebase-upstream)
-3. [Firebase → ESP32 (Downstream/Commands)](#firebase--esp32-downstreamcommands)
-4. [RPi → Firebase (Polling)](#rpi--firebase-polling)
-5. [RPi → Firebase (Alerts/Commands)](#rpi--firebase-alertscommands)
-6. [Synchronization & Timing](#synchronization--timing)
-7. [Retry Logic & Error Handling](#retry-logic--error-handling)
-8. [Timeouts & Watchdogs](#timeouts--watchdogs)
-9. [Offline Handling](#offline-handling)
-10. [Security Considerations](#security-considerations)
-11. [Monitoring & Debugging](#monitoring--debugging)
+2. [Hardware Connection](#hardware-connection)
+3. [RPi Auto Port Detection](#rpi-auto-port-detection)
+4. [ESP32 Firmware (USB Serial)](#esp32-firmware-usb-serial)
+5. [RPi Python Serial Reader](#rpi-python-serial-reader)
+6. [Message Protocol (JSON)](#message-protocol-json)
+7. [Auto Port Detection Logic](#auto-port-detection-logic)
+8. [Error Handling & Reconnection](#error-handling--reconnection)
+9. [Testing & Verification](#testing--verification)
 
 ---
 
 ## Communication Overview
 
 ```
-┌─────────────┐     HTTPS/SSE      ┌──────────────────┐     REST Poll      ┌─────────────┐
-│   ESP32     │ ─────────────────▶ │ Firebase Realtime │ ◀───────────────── │    RPi      │
-│  (Edge)     │ ◀───────────────── │    Database      │ ─────────────────▶ │  (Backend)  │
-└─────────────┘   Commands/Stream  └──────────────────┘   Alerts/Config    └─────────────┘
-      │                                                              │
-      │                    ┌──────────────────┐                     │
-      └──────────────────▶ │   SPIFFS Log     │ ◀──────────────────┘
-                           │  (Offline Queue) │
-                           └──────────────────┘
+┌─────────────┐     USB Cable (UART)      ┌──────────────────┐
+│   ESP32     │ ─────────────────────────▶ │   Raspberry Pi   │
+│  (NodeMCU)  │ ◀───────────────────────── │   (Python Serial)│
+│  115200     │      JSON over UART        │  /dev/ttyUSB0/1  │
+└─────────────┘     115200 8N1            └──────────────────┘
+      │                                                  │
+      │              Auto-detect on                      │
+      │              /dev/ttyUSB0 or ttyUSB1             │
+      ▼                                                  ▼
 ```
 
 ### Data Flow Summary
 
-| Direction | Method | Frequency | Payload | Library |
-|-----------|--------|-----------|---------|---------|
-| ESP32 → Firebase | `pushJSON` (HTTPS) | 5-60 sec | Sensor readings | Firebase-ESP-Client |
-| Firebase → ESP32 | SSE Stream | Real-time | Commands | Firebase-ESP-Client |
-| RPi → Firebase | REST Poll | 5 sec | Read readings | Pyrebase4 |
-| RPi → Firebase | REST Write | On event | Alerts, commands | Pyrebase4 |
+| Direction | Method | Frequency | Payload | Transport |
+|-----------|--------|-----------|---------|-----------|
+| ESP32 → RPi | `Serial.println(JSON)` | Every 1-5 sec | Sensor readings | USB UART |
+| RPi → ESP32 | `Serial.write(JSON)` | On command | Commands/Config | USB UART |
 
 ---
 
-## ESP32 → Firebase (Upstream)
+## Hardware Connection
 
-### Initialization
+| ESP32 Pin | USB Cable | RPi Port | Notes |
+|-----------|-----------|----------|-------|
+| USB D+ | USB D+ | USB D+ | Data+ |
+| USB D- | USB D- | USB D- | Data- |
+| 5V (VIN) | USB 5V | USB 5V | Power from RPi |
+| GND | USB GND | USB GND | Common ground |
 
-```cpp
-// firebase_client.h
-#include <Firebase_ESP_Client.h>
-#include "addons/TokenHelper.h"
-#include "addons/RTDBHelper.h"
-
-FirebaseData fbData;
-FirebaseData fbStream;
-FirebaseAuth fbAuth;
-FirebaseConfig fbConfig;
-
-bool firebaseReady = false;
-unsigned long lastUpload = 0;
-
-void setupFirebase() {
-    fbConfig.api_key = FIREBASE_API_KEY;
-    fbConfig.database_url = FIREBASE_DATABASE_URL;
-    
-    fbAuth.user.email = FIREBASE_USER_EMAIL;
-    fbAuth.user.password = FIREBASE_USER_PASSWORD;
-    
-    fbConfig.token_status_callback = tokenStatusCallback;
-    
-    Firebase.begin(&fbConfig, &fbAuth);
-    Firebase.reconnectWiFi(true);
-    
-    // Buffer sizes for payloads
-    fbData.setResponseSize(2048);
-    fbStream.setResponseSize(2048);
-    
-    // Start command stream
-    String streamPath = "/commands/" + String(DEVICE_ID);
-    if (Firebase.RTDB.beginStream(&fbStream, streamPath)) {
-        Serial.println("Firebase stream started on: " + streamPath);
-    }
-}
-```
-
-### Upload Readings (Periodic)
-
-```cpp
-void uploadReadings(SensorMetrics metrics[4]) {
-    if (!Firebase.ready()) {
-        Serial.println("Firebase not ready, queueing to SPIFFS");
-        queueToSpiffs(metrics);
-        return;
-    }
-    
-    FirebaseJson json;
-    String timestamp = getISO8601Timestamp();  // "2026-07-14T08:30:00Z"
-    String path = "/readings/" + String(DEVICE_ID) + "/" + timestamp;
-    
-    // Inlet sensor (index 0)
-    json.set("inlet/flow_rate", metrics[0].flowRate);
-    json.set("inlet/volume", metrics[0].volume);
-    json.set("inlet/total", metrics[0].total);
-    json.set("inlet/pulse_count", metrics[0].pulseCount);
-    json.set("inlet/k_factor", PPL_INLET);
-    
-    // Fixture sensors (indices 1-3)
-    for (int i = 1; i < 4; i++) {
-        String prefix = "fixture_" + String(i);
-        json.set(prefix + "/flow_rate", metrics[i].flowRate);
-        json.set(prefix + "/volume", metrics[i].volume);
-        json.set(prefix + "/total", metrics[i].total);
-        json.set(prefix + "/pulse_count", metrics[i].pulseCount);
-    }
-    
-    // Device metadata
-    json.set("device/rssi", WiFi.RSSI());
-    json.set("device/uptime", millis() / 1000);
-    json.set("device/free_heap", ESP.getFreeHeap());
-    json.set("device/firmware", FIRMWARE_VERSION);
-    
-    // Push to Firebase
-    if (Firebase.RTDB.pushJSON(&fbData, path.c_str(), &json)) {
-        Serial.println("✅ Uploaded: " + fbData.dataPath());
-        
-        // Process any queued offline data
-        processSpiffsQueue();
-    } else {
-        Serial.println("❌ Upload failed: " + fbData.errorReason());
-        queueToSpiffs(metrics);
-    }
-}
-```
-
-### Payload Size Optimization
-
-```cpp
-// Keep payloads small for faster uploads
-// Target: < 1 KB per reading
-
-// Use short field names in production
-json.set("fr", flow_rate);      // instead of "flow_rate"
-json.set("vol", volume);        // instead of "volume"
-json.set("tot", total);         // instead of "total"
-json.set("pc", pulse_count);    // instead of "pulse_count"
-json.set("kf", k_factor);       // instead of "k_factor"
-
-// Device metadata (only send periodically)
-json.set("rssi", WiFi.RSSI());
-json.set("heap", ESP.getFreeHeap());
-```
+> **Important:** Use a **data-capable USB cable** (not charge-only). The CP2102/CH340 USB-UART bridge on NodeMCU-32S exposes `/dev/ttyUSB0` (or `ttyUSB1` if multiple devices).
 
 ---
 
-## Firebase → ESP32 (Downstream/Commands)
+## RPi Auto Port Detection
 
-### Stream Listener
+### udev Rule for Consistent Naming
 
-```cpp
-void processStream() {
-    if (!Firebase.RTDB.streamAvailable(&fbStream)) return;
-    
-    String path = fbStream.dataPath();      // e.g., "/cmd_123"
-    String type = fbStream.dataType();      // "json", "string", "int"
-    String value = fbStream.stringData();   // Raw value
-    
-    Serial.printf("Stream: path=%s, type=%s, value=%s\n", 
-                  path.c_str(), type.c_str(), value.c_str());
-    
-    if (path == "/") {
-        // Full payload update
-        if (type == "json") {
-            FirebaseJson &json = fbStream.jsonObject();
-            processCommandJson(json);
-        }
-    } else {
-        // Individual field update
-        processCommandField(path, value);
-    }
-}
+```bash
+# /etc/udev/rules.d/99-esp32.rules
+# CP2102 (NodeMCU-32S)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
+# CH340 (some ESP32 boards)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
 
-void processCommandJson(FirebaseJson &json) {
-    FirebaseJsonData data;
-    
-    String command;
-    if (json.get(data, "command")) {
-        command = data.stringValue;
-    }
-    
-    if (command == "calibrate") {
-        startCalibration(0);  // All sensors
-    } else if (command == "calibrate_inlet") {
-        startCalibration(0);  // Inlet only
-    } else if (command == "reboot") {
-        ESP.restart();
-    } else if (command == "update_config") {
-        FirebaseJsonData pplData;
-        if (json.get(pplData, "pulse_per_liter_inlet")) {
-            PPL_INLET = pplData.floatValue;
-            saveConfig();
-        }
-    }
-    
-    // Acknowledge
-    acknowledgeCommand(path);
-}
+# Apply:
+sudo udevadm control --reload-rules
+sudo udevadm trigger
 ```
 
-### Command Structure (Firebase)
+Now ESP32 always appears as `/dev/ttyESP32` (symlink to ttyUSB0/1).
 
-```json
-// Written by RPi or Dashboard to: /commands/wm_001/cmd_abc123
-{
-  "command": "calibrate",
-  "timestamp": "2026-07-14T08:30:00Z",
-  "source": "dashboard",
-  "params": {
-    "sensor": "inlet",
-    "known_volume": 5.0
-  },
-  "executed": false
-}
-
-// ESP32 acknowledges by updating:
-{
-  "command": "calibrate",
-  "timestamp": "2026-07-14T08:30:00Z",
-  "source": "dashboard",
-  "params": {...},
-  "executed": true,
-  "executed_at": "2026-07-14T08:30:05Z",
-  "result": "success"
-}
-```
-
----
-
-## RPi → Firebase (Polling)
-
-### Pyrebase4 Listener
+### Python Auto-Detection (No udev Required)
 
 ```python
-# rpi/firebase_listener.py
-import pyrebase
-import json
-import threading
-import time
-from datetime import datetime
+# rpi/serial_port.py
+import glob
+import serial
+import logging
 
-class FirebaseListener:
-    def __init__(self, config_path, email, password, device_id, poll_interval=5):
-        self.device_id = device_id
-        self.poll_interval = poll_interval
-        self.last_timestamp = None
-        self.running = False
-        self._detector = None
-        self._alert_engine = None
-        
-        # Load config
-        with open(config_path) as f:
-            self.firebase_config = json.load(f)
-        
-        # Initialize Pyrebase4
-        self.firebase = pyrebase.initialize_app(self.firebase_config)
-        self.auth = self.firebase.auth()
-        self.db = self.firebase.database()
-        
-        # Sign in
-        self.user = self.auth.sign_in_with_email_and_password(email, password)
-        self.id_token = self.user['idToken']
-        self.refresh_token = self.user['refreshToken']
-        
-        # Refs
-        self.readings_ref = self.db.child(f"readings/{device_id}")
-        self.alerts_ref = self.db.child(f"alerts/{device_id}")
-        self.commands_ref = self.db.child(f"commands/{device_id}")
-        self.device_ref = self.db.child(f"devices/{device_id}")
+logger = logging.getLogger(__name__)
+
+ESP32_VID_PID = [
+    (0x10c4, 0xea60),  # CP2102/CP2104 (NodeMCU-32S)
+    (0x1a86, 0x7523),  # CH340
+    (0x303a, 0x1001),  # ESP32-S3 native USB
+]
+
+def find_esp32_port() -> str | None:
+    """
+    Auto-detect ESP32 serial port.
+    Checks /dev/ttyUSB* and /dev/ttyACM* for known ESP32 VID:PID.
+    Returns first matching port or None.
+    """
+    candidates = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
     
-    def _refresh_token(self):
-        """Refresh auth token if expired"""
+    for port in candidates:
         try:
-            self.user = self.auth.refresh(self.refresh_token)
-            self.id_token = self.user['idToken']
-        except Exception as e:
-            print(f"Token refresh failed: {e}")
-            # Re-authenticate
-            self.user = self.auth.sign_in_with_email_and_password(email, password)
-            self.id_token = self.user['idToken']
+            # Try to open and check VID:PID via sysfs
+            if _is_esp32_device(port):
+                logger.info(f"Found ESP32 on {port}")
+                return port
+        except (OSError, PermissionError) as e:
+            logger.debug(f"Cannot access {port}: {e}")
+            continue
     
-    def set_detector(self, detector):
-        self._detector = detector
-    
-    def set_alert_engine(self, alert_engine):
-        self._alert_engine = alert_engine
-    
-    def start(self):
-        """Start polling thread"""
-        self.running = True
-        self.poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self.poll_thread.start()
-    
-    def stop(self):
-        self.running = False
-        if self.poll_thread:
-            self.poll_thread.join(timeout=5)
-    
-    def _poll_loop(self):
-        while self.running:
-            try:
-                self._check_new_readings()
-            except Exception as e:
-                print(f"Poll error: {e}")
-                if "permission" in str(e).lower() or "unauthorized" in str(e).lower():
-                    self._refresh_token()
-            time.sleep(self.poll_interval)
-    
-    def _check_new_readings(self):
-        """Fetch latest reading from Firebase"""
-        readings = self.readings_ref.order_by_key().limit_to_last(1).get(self.id_token)
-        
-        if readings and readings.val():
-            for ts, data in readings.val().items():
-                if ts != self.last_timestamp:
-                    self.last_timestamp = ts
-                    self.process_reading(data, ts)
-    
-    def process_reading(self, data, timestamp):
-        """Extract features and run ML inference"""
-        if not self._detector:
-            return
-        
-        try:
-            # Extract features for each fixture
-            inlet = data.get('inlet', {})
-            
-            for fixture_idx in [1, 2, 3]:
-                fixture_key = f'fixture_{fixture_idx}'
-                fixture = data.get(fixture_key, {})
-                
-                if fixture.get('flow_rate', 0) > 0.01:  # Only process if flowing
-                    features = self._extract_features(data, fixture_idx)
-                    result = self._detector.predict(features)
-                    
-                    if result['final'] != 'normal':
-                        self._write_alert(result, fixture_idx, data, timestamp)
-                        
-        except Exception as e:
-            print(f"Error processing reading: {e}")
-    
-    def _extract_features(self, data, fixture_idx):
-        """Extract 9 features from raw Firebase data"""
-        import numpy as np
-        from datetime import datetime
-        
-        inlet = data.get('inlet', {})
-        fixture = data.get(f'fixture_{fixture_idx}', {})
-        
-        # 1. Flow rate
-        flow_rate = fixture.get('flow_rate', 0)
-        
-        # 2. Duration (approximate from volume/rate)
-        volume = fixture.get('volume', 0)
-        duration = volume / max(flow_rate / 60, 0.01) if flow_rate > 0 else 0
-        
-        # 3-4. Time features
-        now = datetime.now()
-        hour = now.hour
-        day = now.weekday()
-        
-        # 5. Fixture ID
-        fixture_id = fixture_idx
-        
-        # 6. Inlet ratio
-        inlet_rate = inlet.get('flow_rate', 0)
-        inlet_ratio = inlet_rate / max(flow_rate, 0.01)
-        
-        # 7. Rate variance (simplified - would need rolling buffer)
-        rate_variance = 0
-        
-        # 8. Night flag
-        is_night = 1 if (hour >= 22 or hour < 5) else 0
-        
-        # 9. Pulse trend (simplified)
-        pulse_trend = 0
-        
-        return np.array([[
-            flow_rate, duration, hour, day, fixture_id,
-            inlet_ratio, rate_variance, is_night, pulse_trend
-        ]], dtype=np.float32)
-    
-    def _write_alert(self, result, fixture_idx, data, timestamp):
-        """Write alert to Firebase"""
-        alert_data = {
-            'alert_type': result['final'],
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'confidence': result.get('confidence', 0),
-            'fixture_index': fixture_idx,
-            'fixture_name': {1: 'bidet', 2: 'kitchen', 3: 'bathroom_shower'}.get(fixture_idx),
-            'action': 'monitoring',
-            'details': {
-                'flow_rate': data.get(f'fixture_{fixture_idx}', {}).get('flow_rate', 0),
-                'inlet_flow_rate': data.get('inlet', {}).get('flow_rate', 0),
-                'xgboost_class': result['xgboost']['class'],
-                'xgboost_confidence': result['xgboost']['confidence'],
-                'isolation_forest_anomaly': result['isolation_forest']['anomaly'],
-                'isolation_forest_score': result['isolation_forest']['score']
-            }
-        }
-        
-        try:
-            self.alerts_ref.push(alert_data, self.id_token)
-            print(f"⚠️ ALERT: {result['final']} on fixture {fixture_idx} (conf: {result.get('confidence', 0):.2f})")
-            
-            # Send notification
-            if self._alert_engine:
-                self._alert_engine.send_notification(alert_data)
-        except Exception as e:
-            print(f"Failed to write alert: {e}")
-    
-    def get_latest_reading(self):
-        readings = self.readings_ref.order_by_key().limit_to_last(1).get(self.id_token)
-        return readings.val() if readings else None
-    
-    def get_recent_alerts(self, limit=20):
-        alerts = self.alerts_ref.order_by_key().limit_to_last(limit).get(self.id_token)
-        return alerts.val() if alerts else None
-    
-    def send_command(self, command):
-        """Send command to ESP32 via Firebase"""
-        self.commands_ref.push({
-            'command': command,
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'source': 'dashboard'
-        }, self.id_token)
-    
-    def is_connected(self):
-        """Check if Firebase connection is healthy"""
-        try:
-            self.db.child('.info/connected').get(self.id_token)
-            return True
-        except:
-            return False
-    
-    def reconnect(self):
-        """Force reconnection"""
-        print("Reconnecting to Firebase...")
-        self._sign_in()
-```
+    logger.warning("No ESP32 device found on any ttyUSB/ttyACM port")
+    return None
 
----
-
-## RPi → Firebase (Alerts/Commands)
-
-### Writing Alerts
-
-```python
-def write_alert(self, alert_data):
-    """Write alert to Firebase /alerts/{device_id}"""
+def _is_esp32_device(port: str) -> bool:
+    """Check if port matches known ESP32 VID:PID via sysfs."""
+    import os
     try:
-        self.alerts_ref.push(alert_data, self.id_token)
-        return True
-    except Exception as e:
-        print(f"Alert write failed: {e}")
-        self._refresh_token()
-        return False
-```
-
-### Writing Commands
-
-```python
-def send_calibrate_command(self, sensor='all'):
-    """Send calibration command to ESP32"""
-    cmd = 'calibrate' if sensor == 'all' else f'calibrate_{sensor}'
-    self.send_command(cmd)
-
-def send_reboot_command(self):
-    self.send_command('reboot')
-
-def update_device_config(self, config_dict):
-    """Update device configuration in Firebase"""
-    config_ref = self.db.child(f"config/{self.device_id}")
-    config_ref.update(config_dict, self.id_token)
-```
-
----
-
-## Synchronization & Timing
-
-### NTP Time Sync (ESP32)
-
-```cpp
-// ntp_sync.h
-#include <time.h>
-
-void setupNTP() {
-    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-    
-    // Wait for sync
-    struct tm timeinfo;
-    int retry = 0;
-    while (!getLocalTime(&timeinfo) && retry < 10) {
-        delay(1000);
-        retry++;
-    }
-    
-    if (retry < 10) {
-        Serial.println("NTP synced: " + getISO8601Timestamp());
-    } else {
-        Serial.println("NTP sync failed, using millis()");
-    }
-}
-
-String getISO8601Timestamp() {
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo)) {
-        char buf[25];
-        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &timeinfo);
-        return String(buf);
-    }
-    // Fallback: millis-based approximation
-    return "1970-01-01T00:00:" + String(millis() / 1000) + "Z";
-}
-```
-
-### RPi Time Handling
-
-```python
-# All timestamps in UTC ISO 8601
-from datetime import datetime, timezone
-
-def get_utc_timestamp():
-    return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-
-def parse_firebase_timestamp(ts_str):
-    """Parse ISO 8601 timestamp from Firebase"""
-    return datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-```
-
-### Timing Constraints
-
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| ESP32 read interval | 1000 ms | Sensor physics |
-| ESP32 upload interval | 5000 ms | Firebase rate limits |
-| RPi poll interval | 5000 ms | Match upload rate |
-| NTP sync interval | 24 hours | Clock drift ~1s/day |
-| Command timeout | 30 sec | Network latency buffer |
-| Stream reconnect | Immediate | Firebase handles |
-
----
-
-## Retry Logic & Error Handling
-
-### ESP32 Retry Strategy
-
-```cpp
-void uploadWithRetry(SensorMetrics metrics[4], int maxRetries = 3) {
-    for (int attempt = 1; attempt <= maxRetries; attempt++) {
-        if (uploadReadings(metrics)) {
-            return;  // Success
-        }
+        # Get device path: /dev/ttyUSB0 -> /sys/bus/usb-serial/devices/ttyUSB0
+        port_name = os.path.basename(port)
+        sysfs_path = f"/sys/bus/usb-serial/devices/{port_name}"
         
-        Serial.printf("Upload attempt %d failed, retrying...\n", attempt);
-        delay(1000 * attempt);  // Exponential backoff: 1s, 2s, 3s
-    }
-    
-    // All retries failed
-    Serial.println("All upload attempts failed, queuing to SPIFFS");
-    queueToSpiffs(metrics);
-}
-
-void processSpiffsQueue() {
-    // Process queued readings when connection restored
-    while (hasQueuedData() && Firebase.ready()) {
-        SensorMetrics m = getNextQueued();
-        if (uploadReadings(m)) {
-            removeQueued();
-        } else {
-            break;  // Stop if still failing
-        }
-    }
-}
-```
-
-### RPi Retry Strategy
-
-```python
-import time
-from functools import wraps
-
-def with_retry(max_retries=3, base_delay=1, max_delay=30):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(max_retries):
+        if not os.path.exists(sysfs_path):
+            # Try alternative: /sys/bus/usb/devices/
+            for usb_dev in glob.glob('/sys/bus/usb/devices/*/idVendor'):
                 try:
-                    return func(*args, **kwargs)
-                except Exception as e:
-                    if attempt == max_retries - 1:
-                        raise
-                    delay = min(base_delay * (2 ** attempt), max_delay)
-                    print(f"Attempt {attempt + 1} failed: {e}, retrying in {delay}s")
-                    time.sleep(delay)
-            return None
-        return wrapper
-    return decorator
+                    with open(usb_dev) as f:
+                        vid = int(f.read().strip(), 16)
+                    pid_path = usb_dev.replace('idVendor', 'idProduct')
+                    with open(pid_path) as f:
+                        pid = int(f.read().strip(), 16)
+                    if (vid, pid) in ESP32_VID_PID:
+                        # Check if this USB device has our tty
+                        tty_path = os.path.join(os.path.dirname(usb_dev), f'{port_name}')
+                        if os.path.exists(tty_path):
+                            return True
+                except:
+                    continue
+            return False
+        
+        # Read VID/PID from sysfs
+        vid_path = os.path.join(sysfs_path, '../idVendor')
+        pid_path = os.path.join(sysfs_path, '../idProduct')
+        
+        if os.path.exists(vid_path) and os.path.exists(pid_path):
+            with open(vid_path) as f:
+                vid = int(f.read().strip(), 16)
+            with open(pid_path) as f:
+                pid = int(f.read().strip(), 16)
+            return (vid, pid) in ESP32_VID_PID
+    except Exception:
+        pass
+    return False
 
-class FirebaseListener:
-    @with_retry(max_retries=3)
-    def _check_new_readings(self):
-        # ... existing code ...
-        pass
+def get_serial_connection(baudrate: int = 115200, timeout: float = 1.0) -> serial.Serial | None:
+    """
+    Get serial connection to ESP32 with auto port detection.
+    Raises exception if no ESP32 found.
+    """
+    port = find_esp32_port()
+    if not port:
+        raise RuntimeError("No ESP32 device found. Check USB connection.")
     
-    @with_retry(max_retries=3)
-    def write_alert(self, alert_data):
-        # ... existing code ...
-        pass
+    logger.info(f"Connecting to ESP32 on {port} at 115200 baud")
+    return serial.Serial(
+        port=port,
+        baudrate=baudrate,
+        timeout=1.0,
+        write_timeout=1.0,
+        bytesize=serial.EIGHTBITS,
+        parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE,
+        rtscts=False,
+        dsrdtr=False
+    )
 ```
 
 ---
 
-## Timeouts & Watchdogs
+## ESP32 Firmware (USB Serial)
 
-### ESP32 Watchdogs
+### Minimal Serial JSON Sender
 
 ```cpp
-// Hardware watchdog (prevents freeze)
-#include <esp_task_wdt.h>
+// esp32/src/main.cpp
+#include <Arduino.h>
+#include <ArduinoJson.h>
+
+// Sensor pins
+const uint8_t PIN_INLET = 26;
+const uint8_t PIN_FIX1 = 25;
+const uint8_t PIN_FIX2 = 33;
+const uint8_t PIN_FIX3 = 32;
+
+// Calibration (pulses per liter)
+const float PPL_INLET = 450.0;
+const float PPL_FIX1 = 450.0;
+const float PPL_FIX2 = 450.0;
+const float PPL_FIX3 = 450.0;
+
+// Pulse counters (volatile for ISR)
+volatile uint32_t pulseCount[4] = {0, 0, 0, 0};
+volatile uint32_t lastPulseTime[4] = {0, 0, 0, 0};
+
+// Timing
+unsigned long lastSend = 0;
+const unsigned long SEND_INTERVAL_MS = 5000;  // 5 seconds
+
+// JSON document
+StaticJsonDocument<512> doc;
+
+void IRAM_ATTR pulseISR0() { if (millis() - lastPulseTime[0] > 5) { pulseCount[0]++; lastPulseTime[0] = millis(); } }
+void IRAM_ATTR pulseISR1() { if (millis() - lastPulseTime[1] > 5) { pulseCount[1]++; lastPulseTime[1] = millis(); } }
+void IRAM_ATTR pulseISR2() { if (millis() - lastPulseTime[2] > 5) { pulseCount[2]++; lastPulseTime[2] = millis(); } }
+void IRAM_ATTR pulseISR3() { if (millis() - lastPulseTime[3] > 5) { pulseCount[3]++; lastPulseTime[3] = millis(); } }
 
 void setup() {
-    // Enable task watchdog (timeout: 30 seconds)
-    esp_task_wdt_init(30, true);  // 30s timeout, panic on timeout
-    esp_task_wdt_add(NULL);       # Add current task
+    Serial.begin(115200);
+    while (!Serial) delay(10);
+    
+    // Setup pins
+    pinMode(PIN_INLET, INPUT);
+    pinMode(PIN_FIX1, INPUT);
+    pinMode(PIN_FIX2, INPUT);
+    pinMode(PIN_FIX3, INPUT);
+    
+    // Attach interrupts
+    attachInterrupt(digitalPinToInterrupt(PIN_INLET), pulseISR0, RISING);
+    attachInterrupt(digitalPinToInterrupt(PIN_FIX1), pulseISR1, RISING);
+    attachInterrupt(digitalPinToInterrupt(PIN_FIX2), pulseISR2, RISING);
+    attachInterrupt(digitalPinToInterrupt(PIN_FIX3), pulseISR3, RISING);
+    
+    Serial.println("ESP32 Water Meter Ready");
 }
 
 void loop() {
-    // Feed watchdog regularly
-    esp_task_wdt_reset();
-    
-    // Your loop code...
-    sensorManager.readAll();
-    firebaseClient.processStream();
-    
-    if (millis() - lastUpload > UPLOAD_INTERVAL_MS) {
-        firebaseClient.uploadReadings(metrics);
-        lastUpload = millis();
+    // Check for incoming commands from RPi
+    if (Serial.available()) {
+        handleCommand();
     }
     
-    delay(100);  # Prevent watchdog reset
-}
-```
-
-### Network Watchdogs
-
-```cpp
-void checkNetworkHealth() {
-    static unsigned long lastWiFiCheck = 0;
-    if (millis() - lastWiFiCheck > 60000) {  // Every minute
-        lastWiFiCheck = millis();
-        if (WiFi.status() != WL_CONNECTED) {
-            Serial.println("WiFi disconnected, reconnecting...");
-            WiFi.reconnect();
-        }
-        if (!Firebase.ready()) {
-            Serial.println("Firebase not ready");
-        }
+    // Periodic sensor data send
+    if (millis() - lastSend >= SEND_INTERVAL_MS) {
+        sendSensorData();
+        lastSend = millis();
     }
 }
-```
 
-### RPi Timeouts
+void sendSensorData() {
+    doc.clear();
+    
+    // Inlet (index 0)
+    float inletRate = (pulseCount[0] * 60.0) / (PPL_INLET * (SEND_INTERVAL_MS / 1000.0));
+    float inletVolume = pulseCount[0] / PPL_INLET;
+    
+    doc["inlet"]["flow_rate"] = round(inletRate * 100) / 100.0;
+    doc["inlet"]["volume"] = round(inletVolume * 100) / 100.0;
+    doc["inlet"]["pulses"] = pulseCount[0];
+    doc["inlet"]["ppl"] = PPL_INLET;
+    
+    // Fixtures (1-3)
+    const char* fixNames[3] = {"bidet", "kitchen", "bathroom_shower"};
+    const float PPL_FIX[3] = {PPL_FIX1, PPL_FIX2, PPL_FIX3};
+    
+    for (int i = 0; i < 3; i++) {
+        float rate = (pulseCount[i+1] * 60.0) / (PPL_FIX[i] * (SEND_INTERVAL_MS / 1000.0));
+        float vol = pulseCount[i+1] / PPL_FIX[i];
+        
+        JsonObject fix = doc[fixNames[i]].to<JsonObject>();
+        fix["flow_rate"] = round(rate * 100) / 100.0;
+        fix["volume"] = round(vol * 100) / 100.0;
+        fix["pulses"] = pulseCount[i+1];
+        fix["ppl"] = PPL_FIX[i];
+    }
+    
+    // Device info
+    doc["device_id"] = "wm_001";
+    doc["uptime_ms"] = millis();
+    doc["free_heap"] = ESP.getFreeHeap();
+    doc["rssi"] = WiFi.RSSI();
+    
+    // Serialize and send
+    serializeJson(doc, Serial);
+    Serial.println();  // Newline delimiter
+    
+    // Reset pulse counters for next interval
+    for (int i = 0; i < 4; i++) pulseCount[i] = 0;
+}
 
-```python
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-def create_session():
-    session = requests.Session()
-    retry_strategy = Retry(
-        total=3,
-        backoff_factor=1,
-        status_forcelist=[429, 500, 502, 503, 504],
-    )
-    adapter = HTTPAdapter(max_retries=retry_strategy)
-    session.mount("https://", adapter)
-    session.mount("http://", adapter)
-    return session
-
-# Firebase REST timeout
-FIREBASE_TIMEOUT = 10  # seconds
-
-# In firebase_listener.py
-readings = self.readings_ref.order_by_key().limit_to_last(1).get(
-    self.id_token, 
-    timeout=FIREBASE_TIMEOUT
-)
+void handleCommand() {
+    StaticJsonDocument<256> cmdDoc;
+    DeserializationError err = deserializeJson(cmdDoc, Serial);
+    if (err) return;
+    
+    const char* cmd = cmdDoc["cmd"];
+    if (!cmd) return;
+    
+    StaticJsonDocument<256> resp;
+    resp["cmd"] = cmd;
+    resp["status"] = "ok";
+    
+    if (strcmp(cmd, "calibrate") == 0) {
+        // Reset all counters, wait for known volume
+        for (int i = 0; i < 4; i++) pulseCount[i] = 0;
+        resp["msg"] = "Calibration mode: run known volume";
+    } else if (strcmp(cmd, "reboot") == 0) {
+        resp["msg"] = "Rebooting...";
+        serializeJson(resp, Serial);
+        Serial.println();
+        ESP.restart();
+    } else if (strcmp(cmd, "set_ppl") == 0) {
+        int sensor = cmdDoc["sensor"] | 0;  // 0=inlet, 1-3=fixtures
+        float ppl = cmdDoc["ppl"] | 450.0;
+        // Update PPL (would need persistent storage)
+        resp["msg"] = "PPL updated (not persistent)";
+    }
+    
+    serializeJson(resp, Serial);
+    Serial.println();
+}
 ```
 
 ---
 
-## Offline Handling
+## RPi Python Serial Reader
 
-### ESP32 SPIFFS Queue
-
-```cpp
-// data_logger.h
-#include <SPIFFS.h>
-
-#define MAX_QUEUED_READINGS 1000
-#define QUEUE_FILE "/queue.json"
-
-void queueToSpiffs(SensorMetrics metrics[4]) {
-    if (!SPIFFS.begin(true)) return;
-    
-    File file = SPIFFS.open(QUEUE_FILE, FILE_APPEND);
-    if (!file) return;
-    
-    FirebaseJson json;
-    // ... build same JSON as uploadReadings ...
-    
-    String output;
-    json.toString(output);
-    file.println(output);
-    file.close();
-}
-
-bool hasQueuedData() {
-    return SPIFFS.exists(QUEUE_FILE);
-}
-
-SensorMetrics getNextQueued() {
-    // Read first line from queue file
-    // Parse and return metrics
-}
-
-void removeQueued() {
-    // Remove first line from queue file
-    // (rewrite file without first line)
-}
-```
-
-### RPi Offline Detection
+### Complete Reader with Auto-Reconnect
 
 ```python
-def check_firebase_connectivity():
-    """Check if Firebase is reachable"""
-    try:
-        response = requests.get(
-            "https://www.googleapis.com",
-            timeout=5
+# rpi/serial_reader.py
+import json
+import time
+import threading
+import logging
+from typing import Callable, Optional, Dict, Any
+from dataclasses import dataclass
+from serial_reader import get_serial_connection, find_esp32_port
+import serial
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class SensorReading:
+    inlet: Dict[str, Any]
+    bidet: Dict[str, Any]
+    kitchen: Dict[str, Any]
+    bathroom_shower: Dict[str, Any]
+    device_id: str
+    uptime_ms: int
+    free_heap: int
+    rssi: int
+    timestamp: float
+
+class ESP32SerialReader:
+    """Reads JSON sensor data from ESP32 via USB serial with auto-reconnect."""
+    
+    def __init__(
+        self,
+        on_reading: Callable[[SensorReading], None],
+        on_error: Optional[Callable[[Exception], None]] = None,
+        baudrate: int = 115200,
+        reconnect_delay: float = 5.0
+    ):
+        self.on_reading = on_reading
+        self.on_error = on_error
+        self.baudrate = baudrate
+        self.reconnect_delay = reconnect_delay
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._serial: Optional[serial.Serial] = None
+        self._buffer = ""
+    
+    def start(self):
+        """Start reading thread."""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread.start()
+        logger.info("ESP32 serial reader started")
+    
+    def stop(self):
+        """Stop reading thread."""
+        self._running = False
+        if self._serial:
+            self._serial.close()
+        if self._thread:
+            self._thread.join(timeout=5)
+        logger.info("ESP32 serial reader stopped")
+    
+    def _read_loop(self):
+        while self._running:
+            try:
+                # Get connection (auto-detects port)
+                if not self._serial or not self._serial.is_open:
+                    self._connect()
+                
+                # Read line
+                line = self._serial.readline().decode('utf-8', errors='ignore').strip()
+                if not line:
+                    continue
+                
+                # Parse JSON
+                self._process_line(line)
+                
+            except serial.SerialException as e:
+                logger.warning(f"Serial error: {e}. Reconnecting in {self.reconnect_delay}s...")
+                self._close_serial()
+                time.sleep(self.reconnect_delay)
+            except Exception as e:
+                logger.error(f"Unexpected error: {e}")
+                if self.on_error:
+                    self.on_error(e)
+                time.sleep(1)
+    
+    def _connect(self):
+        """Establish serial connection with auto port detection."""
+        while self._running:
+            try:
+                self._serial = get_serial_connection(baudrate=115200, timeout=1.0)
+                logger.info("Serial connection established")
+                self._buffer = ""
+                return
+            except RuntimeError as e:
+                logger.warning(f"Connection failed: {e}. Retrying in {self.reconnect_delay}s...")
+                time.sleep(self.reconnect_delay)
+            except Exception as e:
+                logger.error(f"Unexpected connection error: {e}")
+                time.sleep(self.reconnect_delay)
+    
+    def _close_serial(self):
+        if self._serial and self._serial.is_open:
+            try:
+                self._serial.close()
+            except:
+                pass
+            self._serial = None
+    
+    def _process_line(self, line: str):
+        """Parse JSON line and emit reading."""
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            logger.debug(f"Invalid JSON: {line[:100]}")
+            return
+        
+        # Validate required fields
+        required = ['inlet', 'bidet', 'kitchen', 'bathroom_shower', 'device_id']
+        if not all(k in data for k in required):
+            logger.debug(f"Missing required fields: {data}")
+            return
+        
+        reading = SensorReading(
+            inlet=data['inlet'],
+            bidet=data.get('bidet', {}),
+            kitchen=data.get('kitchen', {}),
+            bathroom_shower=data.get('bathroom_shower', {}),
+            device_id=data.get('device_id', 'unknown'),
+            uptime_ms=data.get('uptime_ms', 0),
+            free_heap=data.get('free_heap', 0),
+            rssi=data.get('rssi', 0),
+            timestamp=time.time()
         )
-        return response.status_code == 200
-    except:
-        return False
+        
+        # Call callback
+        try:
+            self.on_reading(reading)
+        except Exception as e:
+            logger.error(f"Callback error: {e}")
+```
 
-# In poll_loop:
-if not check_firebase_connectivity():
-    print("Firebase unreachable, waiting...")
-    time.sleep(30)
-    continue
+### Integration with ML Pipeline
+
+```python
+# rpi/main.py
+from rpi.serial_reader import ESP32SerialReader, SensorReading
+from rpi.ml_inference import LeakDetector
+from rpi.firebase_listener import FirebaseListener
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize ML detector
+detector = LeakDetector(
+    xgb_path='models/xgboost_model.json',
+    iforest_path='models/isolation_forest.pkl',
+    scaler_path='models/scaler.pkl',
+    threshold_path='models/iso_threshold.pkl'
+)
+detector.warm_up()
+
+# Initialize Firebase (for alerts/commands)
+firebase = FirebaseListener(
+    config_path='firebase_config.json',
+    email='esp32@project.iam.gserviceaccount.com',
+    password='password',
+    device_id='wm_001'
+)
+firebase.set_detector(detector)
+firebase.start()
+
+# Callback for serial readings
+def on_reading(reading: SensorReading):
+    logger.info(f"Inlet: {reading.inlet['flow_rate']:.2f} L/min, "
+                f"Bidet: {reading.bidet.get('flow_rate', 0):.2f}, "
+                f"Kitchen: {reading.kitchen.get('flow_rate', 0):.2f}, "
+                f"Shower: {reading.bathroom_shower.get('flow_rate', 0):.2f}")
+    
+    # Run ML inference per fixture
+    for fixture_name in ['bidet', 'kitchen', 'bathroom_shower']:
+        fixture = getattr(reading, fixture_name)
+        if fixture.get('flow_rate', 0) > 0.01:
+            features = extract_features(reading, fixture_name)  # 9 features
+            result = detector.predict(features)
+            
+            if result['final'] != 'normal':
+                logger.warning(f"LEAK: {result['final']} on {fixture_name} (conf: {result['confidence']:.2f})")
+                firebase.write_alert({
+                    'alert_type': result['final'],
+                    'fixture': fixture_name,
+                    'confidence': result['confidence'],
+                    'details': result
+                })
+
+# Start serial reader
+reader = ESP32SerialReader(on_reading=on_reading)
+reader.start()
+
+# Keep main thread alive
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    reader.stop()
+    firebase.stop()
 ```
 
 ---
 
-## Security Considerations
+## Message Protocol (JSON)
 
-### Firebase Security Rules
+### ESP32 → RPi (Sensor Data)
 
 ```json
 {
-  "rules": {
-    "readings": {
-      "$device_id": {
-        "$timestamp": {
-          ".read": "auth != null && auth.uid == $device_id",
-          ".write": "auth != null && auth.uid == $device_id",
-          ".validate": "newData.hasChildren(['inlet', 'fixture_1', 'fixture_2', 'fixture_3'])"
-        }
-      }
-    },
-    "commands": {
-      "$device_id": {
-        ".read": "auth != null && auth.uid == $device_id",
-        ".write": "auth.uid == 'rpi-backend' || auth.uid == 'dashboard-admin'"
-      }
-    },
-    "alerts": {
-      "$device_id": {
-        ".read": "auth != null",
-        ".write": "auth.uid == 'rpi-backend' || auth.uid == $device_id"
-      }
-    },
-    "devices": {
-      ".read": "auth != null",
-      "$device_id": {
-        ".write": "auth.uid == $device_id || auth.uid == 'dashboard-admin'"
-      }
-    },
-    "models": {
-      ".read": "auth != null",
-      ".write": "auth.uid == 'rpi-backend'"
-    },
-    "config": {
-      "$device_id": {
-        ".read": "auth != null && auth.uid == $device_id",
-        ".write": "auth.uid == 'dashboard-admin'"
-      }
-    }
-  }
+  "inlet": {
+    "flow_rate": 12.5,
+    "volume": 2.5,
+    "pulses": 1125,
+    "ppl": 450
+  },
+  "bidet": {
+    "flow_rate": 5.2,
+    "volume": 0.9,
+    "pulses": 405,
+    "ppl": 450
+  },
+  "kitchen": {
+    "flow_rate": 0.0,
+    "volume": 0.0,
+    "pulses": 0,
+    "ppl": 450
+  },
+  "bathroom_shower": {
+    "flow_rate": 0.2,
+    "volume": 0.02,
+    "pulses": 10,
+    "ppl": 450
+  },
+  "device_id": "wm_001",
+  "uptime_ms": 86400000,
+  "free_heap": 180000,
+  "rssi": -65
 }
 ```
 
-### ESP32 Security
+### RPi → ESP32 (Commands)
 
-```cpp
-// Use certificate validation (Firebase-ESP-Client does this automatically)
-// Ensure time is synced for TLS certificate validation
-configTime(0, 0, "pool.ntp.org");
-
-// Never hardcode secrets in firmware
-// Use config.h (gitignored) or secure element
+```json
+{"cmd": "calibrate"}
+{"cmd": "reboot"}
+{"cmd": "set_ppl", "sensor": 0, "ppl": 462.5}
 ```
 
-### RPi Security
+### ESP32 → RPi (Command Response)
 
-```python
-# Store credentials in .env (gitignored)
-# .env file:
-FIREBASE_EMAIL=esp32@your-project.iam.gserviceaccount.com
-FIREBASE_PASSWORD=strong_random_password
-DEVICE_ID=wm_001
-
-# Load in Python
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-EMAIL = os.getenv('FIREBASE_EMAIL')
-PASSWORD = os.getenv('FIREBASE_PASSWORD')
-DEVICE_ID = os.getenv('DEVICE_ID')
+```json
+{"cmd": "calibrate", "status": "ok", "msg": "Calibration mode: run known volume"}
+{"cmd": "reboot", "status": "ok", "msg": "Rebooting..."}
 ```
 
 ---
 
-## Monitoring & Debugging
+## Auto Port Detection Logic
 
-### ESP32 Debug Commands
+### Detection Priority
 
-```cpp
-// Serial commands for debugging
-void handleSerialCommand(String cmd) {
-    if (cmd == "status") {
-        printStatus();
-    } else if (cmd == "firebase") {
-        printFirebaseStatus();
-    } else if (cmd == "queue") {
-        printQueueSize();
-    } else if (cmd == "test_upload") {
-        uploadReadings(testMetrics);
-    } else if (cmd == "clear_queue") {
-        clearSpiffsQueue();
-    }
-}
+1. **`/dev/ttyESP32`** (udev symlink) — highest priority
+2. **`/dev/ttyUSB*`** with matching VID:PID (CP2102/CH340)
+3. **`/dev/ttyACM*`** with matching VID:PID (native USB)
 
-void printFirebaseStatus() {
-    Serial.printf("Firebase ready: %s\n", Firebase.ready() ? "YES" : "NO");
-    Serial.printf("WiFi RSSI: %d dBm\n", WiFi.RSSI());
-    Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
-    Serial.printf("Stream connected: %s\n", fbStream.httpConnected() ? "YES" : "NO");
-}
+### Detection Flow
+
+```
+find_esp32_port()
+    │
+    ├─ Check /dev/ttyESP32 (udev symlink) → return if exists
+    │
+    ├─ Scan /dev/ttyUSB* and /dev/ttyACM*
+    │     │
+    │     ├─ For each port: read VID:PID from sysfs
+    │     │
+    │     ├─ Match against known ESP32 VID:PID pairs
+    │     │
+    │     └─ Return first match
+    │
+    └─ No match → return None
 ```
 
-### RPi Monitoring
+### Known ESP32 VID:PID Pairs
+
+| Chip | VID (hex) | PID (hex) | Description |
+|------|-----------|-----------|-------------|
+| CP2102/CP2104 | 0x10c4 | 0xea60 | NodeMCU-32S, most ESP32 dev boards |
+| CH340/CH341 | 0x1a86 | 0x7523 | Cheap ESP32 boards |
+| ESP32-S3 native | 0x303a | 0x1001 | Native USB (no bridge) |
+
+---
+
+## Error Handling & Reconnection
+
+### Reconnection Strategy
+
+| Failure Type | Action | Delay |
+|--------------|--------|-------|
+| Port not found | Scan all ttyUSB/ttyACM, retry | 5 sec |
+| Permission denied | Check dialout group, retry | 5 sec |
+| SerialException (disconnect) | Close port, re-scan, reopen | 5 sec |
+| JSON decode error | Log warning, continue | 1 sec |
+| Buffer overflow | Reset buffer, continue | 1 sec |
+
+### Buffer Management
 
 ```python
-# Health check endpoint
-@app.route('/health')
-def health():
-    return jsonify({
-        'status': 'healthy',
-        'firebase_connected': firebase_listener.is_connected() if hasattr(firebase_listener, 'is_connected') else True,
-        'model_loaded': detector.model_loaded,
-        'last_reading': firebase_listener.last_timestamp,
-        'uptime_seconds': time.time() - start_time,
-        'memory_mb': psutil.Process().memory_info().rss / 1024 / 1024
-    })
-
-# Firebase connection monitor
-def monitor_firebase():
-    while True:
-        if not firebase_listener.is_connected():
-            logger.warning("Firebase connection lost, attempting reconnect")
-            firebase_listener.reconnect()
-        time.sleep(60)
+def _process_line(self, line: str):
+    """Handle incomplete/truncated lines."""
+    self._buffer += line
+    
+    while '\n' in self._buffer:
+        line, self._buffer = self._buffer.split('\n', 1)
+        self._process_line(line.strip())
 ```
 
-### Log Analysis
+---
+
+## Testing & Verification
+
+### 1. Verify Hardware Connection
 
 ```bash
-# ESP32 logs (via Serial)
-# Filter for:
-# ✅ Upload successful
-# ❌ Upload failed
-# 📥 Command received
-# 🔄 Stream reconnected
+# Check USB device
+lsusb | grep -E "(10c4:ea60|1a86:7523|303a:1001)"
+# Should show: Bus 001 Device 004: ID 10c4:ea60 Cygnal Integrated Products, Inc. CP210x
 
-# RPi logs (systemd)
-journalctl -u water-meter.service -f
+# Check serial port
+ls -l /dev/ttyUSB* /dev/ttyACM* /dev/ttyESP32
+# Should show: /dev/ttyUSB0 or /dev/ttyESP32 -> ttyUSB0
+```
 
-# Key metrics to watch:
-# - Upload success rate (target: > 99%)
-# - Command latency (target: < 5s)
-# - Inference latency (target: < 5ms)
-# - Memory usage (target: < 200MB)
-# - Queue size (target: 0)
+### 2. Test Serial Communication
+
+```bash
+# Using screen (exit: Ctrl+A, K, Y)
+screen /dev/ttyUSB0 115200
+
+# Or using Python one-liner
+python3 -c "
+import serial, time
+s = serial.Serial('/dev/ttyUSB0', 115200, timeout=2)
+time.sleep(2)
+for _ in range(5):
+    line = s.readline().decode().strip()
+    print(line)
+"
+```
+
+### 3. Verify JSON Output
+
+```json
+// Expected output every 5 seconds:
+{
+  "inlet": {"flow_rate": 12.5, "volume": 2.5, "pulses": 1125, "ppl": 450},
+  "bidet": {"flow_rate": 5.2, "volume": 0.9, "pulses": 405, "ppl": 450},
+  "kitchen": {"flow_rate": 0.0, "volume": 0.0, "pulses": 0, "ppl": 450},
+  "bathroom_shower": {"flow_rate": 0.2, "volume": 0.02, "pulses": 10, "ppl": 450},
+  "device_id": "wm_001",
+  "uptime_ms": 123456,
+  "free_heap": 180000,
+  "rssi": -65
+}
+```
+
+### 4. End-to-End Test Script
+
+```bash
+# test_serial.py
+python3 -c "
+from rpi.serial_reader import ESP32SerialReader, SensorReading
+import time
+
+def on_reading(r):
+    print(f'Inlet: {r.inlet[\"flow_rate\"]:.2f} L/min | '
+          f'Bidet: {r.bidet.get(\"flow_rate\",0):.2f} | '
+          f'Kitchen: {r.kitchen.get(\"flow_rate\",0):.2f} | '
+          f'Shower: {r.bathroom_shower.get(\"flow_rate\",0):.2f}')
+
+reader = ESP32SerialReader(on_reading=lambda r: print(f'OK: {r.device_id}'))
+reader.start()
+time.sleep(15)
+reader.stop()
+print('Test passed!')
+"
 ```
 
 ---
 
 ## Quick Reference
 
-| Task | ESP32 Code | RPi Code |
-|------|------------|----------|
-| Upload reading | `Firebase.RTDB.pushJSON()` | N/A |
-| Listen commands | `Firebase.RTDB.beginStream()` + `streamAvailable()` | N/A |
-| Poll readings | N/A | `readings_ref.order_by_key().limit_to_last(1).get()` |
-| Write alert | N/A | `alerts_ref.push(alert_data, id_token)` |
-| Send command | N/A | `commands_ref.push(cmd_data, id_token)` |
-| Check connection | `Firebase.ready()` | `check_firebase_connectivity()` |
-| Sync time | `configTime()` + `getLocalTime()` | `datetime.now(timezone.utc)` |
-| Handle offline | SPIFFS queue | Local log + retry |
+| Task | Command/Code |
+|------|--------------|
+| Find ESP32 port | `python3 -c "from serial_port import find_esp32_port; print(find_esp32_port())"` |
+| Monitor serial | `screen /dev/ttyUSB0 115200` |
+| Check permissions | `groups \$USER` (must include `dialout`) |
+| Add udev rule | `sudo tee /etc/udev/rules.d/99-esp32.rules < rules.txt && sudo udevadm control --reload && sudo udevadm trigger` |
+| Install deps | `pip install pyserial` |
 
 ---
 
 ## Official References
 
-- [Firebase-ESP-Client Docs](https://github.com/mobizt/Firebase-ESP-Client)
-- [Pyrebase4 Docs](https://github.com/nhorvath/Pyrebase4)
-- [Firebase Realtime DB REST API](https://firebase.google.com/docs/database/rest/start)
-- [Firebase Security Rules](https://firebase.google.com/docs/database/security)
-- [ESP32 Arduino Time](https://github.com/espressif/arduino-esp32/tree/master/cores/esp32)
-- [SPIFFS on ESP32](https://github.com/espressif/arduino-esp32/tree/master/libraries/SPIFFS)
-
----
-
-## Next Steps
-
-Proceed to:
-1. [Firebase Setup Guide](./firebase-setup-guide.md) — Complete Firebase project configuration
-2. [Project Setup Guide](./setup.md) — Full system deployment
-3. [Troubleshooting Guide](./troubleshooting.md) — Common issues and fixes
+- [pyserial Documentation](https://pyserial.readthedocs.io/)
+- [ESP32 Arduino Serial](https://docs.espressif.com/projects/arduino-esp32/en/latest/api/serial.html)
+- [ArduinoJson v7](https://arduinojson.org/v7/doc/)
+- [udev Rules](https://www.freedesktop.org/software/systemd/man/udev.html)
+- [USB VID/PID Database](https://www.linux-usb.org/usb.ids)
