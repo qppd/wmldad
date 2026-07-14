@@ -192,14 +192,6 @@ https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32
 
 > 📸 **Screenshot Placeholder:** *Library Manager showing "Firebase ESP Client" by mobizt installing*
 
-### Via CLI (Alternative)
-
-```bash
-# If using Arduino CLI alongside IDE
-arduino-cli lib install "Firebase ESP Client"
-arduino-cli lib install "ArduinoJson"
-```
-
 ---
 
 ## Serial Port Permissions
@@ -306,11 +298,6 @@ void loop() {
 ```bash
 # Reinstall ESP32 core
 # In Arduino IDE: Boards Manager → esp32 → Remove → Install
-
-# Or via CLI:
-arduino-cli core uninstall esp32:esp32
-arduino-cli core update-index
-arduino-cli core install esp32:esp32
 ```
 
 ### Issue: Slow IDE startup / High memory usage

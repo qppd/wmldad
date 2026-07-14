@@ -35,13 +35,6 @@
 
 > 📸 **Screenshot Placeholder:** *Library Manager showing "Firebase ESP Client" by Mobizt installing*
 
-### Arduino CLI
-
-```bash
-arduino-cli lib install "Firebase ESP Client"
-arduino-cli lib install "ArduinoJson"
-```
-
 ### PlatformIO
 
 ```ini

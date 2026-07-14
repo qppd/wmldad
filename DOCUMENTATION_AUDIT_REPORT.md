@@ -42,15 +42,14 @@ Completed a comprehensive audit of all project documentation and created **12 ne
 | 2 | Raspberry Pi Networking | `docs/raspberry-pi-networking.md` | 9.6 KB | IP/hostname discovery, SSH, mDNS, static IP, DHCP reservation |
 | 3 | Remote Desktop (RealVNC) | `docs/remote-desktop-guide.md` | 12 KB | Physical/virtual display, headless, HDMI dummy, WayVNC alternative |
 | 4 | Python Environment | `docs/python-environment-guide.md` | 13 KB | venv, pip upgrade, ML libs on ARM64, pyenv, troubleshooting |
-| 5 | Arduino CLI on RPi | `docs/arduino-cli-installation.md` | 11 KB | Binary install, ESP32 core, compile/upload, PATH config |
-| 6 | Arduino IDE on RPi | `docs/arduino-ide-installation.md` | 10.7 KB | Flatpak (recommended), AppImage, ESP32 board manager, udev rules |
-| 7 | ESP32 Setup | `docs/esp32-setup-guide.md` | 13.6 KB | Drivers (CP210x), board selection, boot modes, upload errors |
-| 8 | Firebase ESP Client | `docs/firebase-esp-client-guide.md` | 22 KB | Auth methods, RTDB ops, streaming, error handling, complete example |
-| 9 | ML Dataset Guide | `docs/ml-dataset-guide.md` | 24 KB | Planning, collection, labeling, cleaning, balancing, splitting, versioning (DVC) |
-| 10 | ML Training Guide | `docs/ml-training-guide.md` | 22 KB | Colab/local, XGBoost tuning (Optuna), Isolation Forest, SHAP, export |
-| 11 | Model Deployment | `docs/model-deployment-guide.md` | 23 KB | RPi optimization, Flask API, monitoring, A/B testing, atomic swaps |
-| 12 | ESP32↔RPi Communication | `docs/esp32-rpi-communication.md` | 24.9 KB | Full data flow, retry logic, timeouts, offline handling, security rules |
-| 13 | Firebase Setup | `docs/firebase-setup-guide.md` | 16.7 KB | Project creation, Auth, Database, Web config, Security rules, pricing |
+| 5 | Arduino IDE on RPi | `docs/arduino-ide-installation.md` | 10.7 KB | Flatpak (recommended), AppImage, ESP32 board manager, udev rules |
+| 6 | ESP32 Setup | `docs/esp32-setup-guide.md` | 13.6 KB | Drivers (CP210x), board selection, boot modes, upload errors |
+| 7 | Firebase ESP Client | `docs/firebase-esp-client-guide.md` | 22 KB | Auth methods, RTDB ops, streaming, error handling, complete example |
+| 8 | ML Dataset Guide | `docs/ml-dataset-guide.md` | 24 KB | Planning, collection, labeling, cleaning, balancing, splitting, versioning (DVC) |
+| 9 | ML Training Guide | `docs/ml-training-guide.md` | 22 KB | Colab/local, XGBoost tuning (Optuna), Isolation Forest, SHAP, export |
+| 10 | Model Deployment | `docs/model-deployment-guide.md` | 23 KB | RPi optimization, Flask API, monitoring, A/B testing, atomic swaps |
+| 11 | ESP32↔RPi Communication | `docs/esp32-rpi-communication.md` | 24.9 KB | Full data flow, retry logic, timeouts, offline handling, security rules |
+| 12 | Firebase Setup | `docs/firebase-setup-guide.md` | 16.7 KB | Project creation, Auth, Database, Web config, Security rules, pricing |
 
 ---
 
@@ -95,7 +94,6 @@ Completed a comprehensive audit of all project documentation and created **12 ne
 | Pyrebase4 4.5+ | github.com/nhorvath/Pyrebase4 |
 | XGBoost 2.0+ ARM64 wheels | xgboost.readthedocs.io |
 | scikit-learn IsolationForest | scikit-learn.org/stable/modules/generated/sklearn.ensemble.IsolationForest.html |
-| Arduino CLI 1.0.4 | arduino.github.io/arduino-cli/ |
 | RealVNC on Raspberry Pi OS | realvnc.com/en/connect/docs/raspberry-pi.html |
 
 ---
@@ -125,8 +123,6 @@ All external links in documentation point to current official sources:
 - ✅ Cirkit Designer: app.cirkitdesigner.com
 - ✅ RealVNC Downloads: realvnc.com/en/connect/download/viewer/
 - ✅ CP210x Drivers: silabs.com/developers/usb-to-uart-bridge-vcp-drivers
-- ✅ Arduino CLI Releases: github.com/arduino/arduino-cli/releases
-- ✅ Arduino IDE Downloads: arduino.cc/en/software
 - ✅ XGBoost Docs: xgboost.readthedocs.io
 - ✅ DVC: dvc.org/doc
 
@@ -151,18 +147,17 @@ All external links in documentation point to current official sources:
 | 3. Remote Desktop Guide (RealVNC) | ✅ Created | `docs/remote-desktop-guide.md` |
 | 4. Python Environment Guide | ✅ Created | `docs/python-environment-guide.md` |
 | 5. Requirements Validation | ✅ Created | `requirements.txt` (root, rpi/, training/) |
-| 6. Arduino CLI Installation on RPi | ✅ Created | `docs/arduino-cli-installation.md` |
-| 7. Arduino IDE Installation on RPi | ✅ Created | `docs/arduino-ide-installation.md` |
-| 8. ESP32 Setup Guide | ✅ Created | `docs/esp32-setup-guide.md` |
-| 9. Firebase ESP Client Guide | ✅ Created | `docs/firebase-esp-client-guide.md` |
-| 10. Firebase Setup Guide | ✅ Created | `docs/firebase-setup-guide.md` |
-| 11. Raspberry Pi Project Setup Guide | ✅ Existing | `docs/setup.md` + `docs/rpi-backend.md` |
-| 12. ML Dataset Guide | ✅ Created | `docs/ml-dataset-guide.md` |
-| 13. ML Training Guide | ✅ Created | `docs/ml-training-guide.md` |
-| 14. Model Deployment Guide | ✅ Created | `docs/model-deployment-guide.md` |
-| 15. ESP32 ↔ RPi Communication Guide | ✅ Created | `docs/esp32-rpi-communication.md` |
-| 16. Repository Structure | ✅ Existing | `README.md` + `docs/setup.md` |
-| 17. Troubleshooting Guide | ✅ Existing | `docs/troubleshooting.md` |
+| 6. Arduino IDE Installation on RPi | ✅ Created | `docs/arduino-ide-installation.md` |
+| 7. ESP32 Setup Guide | ✅ Created | `docs/esp32-setup-guide.md` |
+| 8. Firebase ESP Client Guide | ✅ Created | `docs/firebase-esp-client-guide.md` |
+| 9. Firebase Setup Guide | ✅ Created | `docs/firebase-setup-guide.md` |
+| 10. Raspberry Pi Project Setup Guide | ✅ Existing | `docs/setup.md` + `docs/rpi-backend.md` |
+| 11. ML Dataset Guide | ✅ Created | `docs/ml-dataset-guide.md` |
+| 12. ML Training Guide | ✅ Created | `docs/ml-training-guide.md` |
+| 13. Model Deployment Guide | ✅ Created | `docs/model-deployment-guide.md` |
+| 14. ESP32 ↔ RPi Communication Guide | ✅ Created | `docs/esp32-rpi-communication.md` |
+| 15. Repository Structure | ✅ Existing | `README.md` + `docs/setup.md` |
+| 16. Troubleshooting Guide | ✅ Existing | `docs/troubleshooting.md` |
 
 ---
 
@@ -202,13 +197,12 @@ All without asking questions — every step is documented with commands, explana
 
 ## Files Modified/Created Summary
 
-### New Documentation (13 files, ~210 KB)
+### New Documentation (12 files, ~200 KB)
 ```
 docs/raspberry-pi-installation.md      (9 KB)
 docs/raspberry-pi-networking.md        (9.6 KB)
 docs/remote-desktop-guide.md           (12 KB)
 docs/python-environment-guide.md       (13 KB)
-docs/arduino-cli-installation.md       (11 KB)
 docs/arduino-ide-installation.md       (10.7 KB)
 docs/esp32-setup-guide.md              (13.6 KB)
 docs/firebase-esp-client-guide.md      (22 KB)
@@ -219,17 +213,13 @@ docs/esp32-rpi-communication.md        (24.9 KB)
 docs/firebase-setup-guide.md           (16.7 KB)
 ```
 
-### Supporting Code/Config (9 files)
+### Supporting Code/Config (3 files)
 ```
 rpi/requirements.txt
 training/requirements.txt
 requirements.txt (root)
 rpi/water-meter.service
 rpi/.env.example
-rpi/app.py
-rpi/firebase_listener.py
-rpi/ml_inference.py
-rpi/alert_engine.py
 ```
 
 ---

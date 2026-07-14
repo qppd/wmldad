@@ -538,10 +538,9 @@ python app.py
 ## Next Steps
 
 Proceed to:
-1. [Arduino CLI Installation Guide](./arduino-cli-installation.md) — For ESP32 firmware builds
-2. [Arduino IDE Installation Guide](./arduino-ide-installation.md) — Alternative GUI method
-3. [ESP32 Setup Guide](./esp32-setup-guide.md) — Board manager, drivers, upload
-4. [Project Setup Guide](./setup.md) — Full deployment
+1. [Arduino IDE Installation Guide](./arduino-ide-installation.md) — GUI method for ESP32 firmware
+2. [ESP32 Setup Guide](./esp32-setup-guide.md) — Board manager, drivers, upload
+3. [Project Setup Guide](./setup.md) — Full deployment
 
 ---
 

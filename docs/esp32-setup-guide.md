@@ -95,7 +95,7 @@ brew install --cask silicon-labs-vcp-driver
 
 ---
 
-## Arduino IDE / CLI Board Configuration
+## Arduino IDE Board Configuration
 
 ### Arduino IDE 2.x
 
@@ -110,23 +110,6 @@ brew install --cask silicon-labs-vcp-driver
 6. Install **"esp32 by Espressif Systems"** (latest version)
 7. Wait for download (~200 MB)
 
-### Arduino CLI
-
-```bash
-# Add board manager URL
-arduino-cli config add board_manager.additional_urls https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-
-# Update index
-arduino-cli core update-index
-
-# Install ESP32 core
-arduino-cli core install esp32:esp32
-
-# Verify
-arduino-cli core list
-# esp32:esp32  2.0.14  installed
-```
-
 ---
 
 ## Selecting the Correct Board
@@ -136,7 +119,6 @@ arduino-cli core list
 | Interface | Selection |
 |-----------|-----------|
 | **Arduino IDE** | Tools → Board → ESP32 Arduino → **NodeMCU-32S** |
-| **Arduino CLI** | `--fqbn esp32:esp32:nodemcu-32s` |
 
 ### Board Variants (Choose Correct One)
 
@@ -165,8 +147,6 @@ arduino-cli core list
 
 ```bash
 # List available ports
-arduino-cli board list
-# Or:
 ls /dev/ttyUSB* /dev/ttyACM*
 
 # Typical output:
@@ -209,7 +189,7 @@ ls -l /dev/ttyESP32
 1. Connect ESP32 via USB
 2. Select correct board and port
 3. Click **Upload** (`Ctrl+U`)
-4. Arduino IDE/CLI automatically:
+4. Arduino IDE automatically:
    - Resets ESP32 into bootloader mode
    - Uploads firmware via esptool.py
    - Resets into application mode
@@ -414,16 +394,16 @@ Data uploaded to Firebase
 
 ## Quick Reference Card
 
-| Task | Arduino IDE | Arduino CLI |
-|------|-------------|-------------|
-| Board | Tools → Board → ESP32 → **NodeMCU-32S** | `--fqbn esp32:esp32:nodemcu-32s` |
-| Port | Tools → Port → COMx / ttyUSB0 | `-p /dev/ttyUSB0` |
-| Upload Speed | Tools → Upload Speed → 921600 | `--upload-speed 921600` |
-| Compile | `Ctrl+R` | `arduino-cli compile --fqbn ... .` |
-| Upload | `Ctrl+U` | `arduino-cli upload -p ... --fqbn ... .` |
-| Monitor | `Ctrl+Shift+M` | `arduino-cli monitor -p ... -c baudrate=115200` |
-| Bootloader | Hold BOOT → Press EN → Release BOOT | Same |
-| Erase Flash | N/A (use esptool) | `esptool.py --port ... erase_flash` |
+| Task | Arduino IDE |
+|------|-------------|
+| Board | Tools → Board → ESP32 → **NodeMCU-32S** |
+| Port | Tools → Port → COMx / ttyUSB0 |
+| Upload Speed | Tools → Upload Speed → 921600 |
+| Compile | `Ctrl+R` |
+| Upload | `Ctrl+U` |
+| Monitor | `Ctrl+Shift+M` |
+| Bootloader | Hold BOOT → Press EN → Release BOOT |
+| Erase Flash | N/A (use esptool) |
 
 ---
 
