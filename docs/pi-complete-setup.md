@@ -2,7 +2,7 @@
 
 > **Target:** Raspberry Pi 3B+/4/5  
 > **OS:** Raspberry Pi OS Trixie 64-bit (Debian 13)  
-> **Goal:** Fresh Pi OS → SSH + VNC → Full Water Meter Backend (Flask + ML + Firebase)  
+> **Goal:** Fresh Pi OS → SSH + VNC → Full Water Meter Backend (Flask + ML + USB Serial)  
 > **Audience:** Beginners to intermediate — no prior Linux/RPi experience needed
 
 ---
@@ -22,7 +22,7 @@
 9. [Clone Water Meter Project](#9-clone-water-meter-project)
 10. [Create Python Virtual Environment](#10-create-python-virtual-environment)
 11. [Install All Project Dependencies](#11-install-all-project-dependencies)
-12. [Configure Firebase Credentials](#12-configure-firebase-credentials)
+12. [Configure USB Serial (udev rule)](#12-configure-usb-serial-udev-rule)
 13. [Create Backend Application Files](#13-create-backend-application-files)
 14. [Add ML Model Files](#14-add-ml-model-files)
 15. [Verify Installation](#15-verify-installation)
@@ -133,6 +133,7 @@ ping -c 3 google.com
 ```
 
 ### 4.2 Set Static IP (Optional but Recommended)
+
 **Option A: Router DHCP Reservation (Best)**
 1. Log into router admin (192.168.1.1)
 2. Find **DHCP Reservation** / **Address Reservation**
@@ -299,7 +300,7 @@ cd wmldad
 
 # Verify structure
 ls -la
-# Should see: docs/, rpi/, esp32/, etc.
+# Should see: docs/, rpi/, esp32/, training/, model/, wiring/
 ```
 
 ---
@@ -351,10 +352,13 @@ joblib==1.3.2
 
 # Web Dependencies
 flask==3.0.0
-pyrebase4==4.5.0
 gunicorn==21.2.0
 python-dotenv==1.0.0
 requests==2.31.0
+
+# Serial Communication
+pyserial==3.5
+pyserial-asyncio==0.6
 EOF
 ```
 
@@ -368,7 +372,7 @@ pip install --no-cache-dir -r requirements.txt
 
 # Verify
 python -c "
-import xgboost, sklearn, pandas, numpy, flask, pyrebase
+import xgboost, sklearn, pandas, numpy, flask, serial
 print('✅ All packages installed successfully')
 print(f'XGBoost: {xgboost.__version__}')
 print(f'sklearn: {sklearn.__version__}')
@@ -378,65 +382,36 @@ print(f'Flask: {flask.__version__}')
 
 ---
 
-## 12. Configure Firebase Credentials
+## 12. Configure USB Serial (udev rule)
 
-### 12.1 Get Firebase Web Config
-1. Open [Firebase Console](https://console.firebase.google.com)
-2. Select your project
-3. **Project Settings** → **General** → **Your apps** → **Web app (</>)**
-4. Copy the `firebaseConfig` object
+Create a persistent symlink `/dev/ttyESP32` for the ESP32 USB device:
 
-### 12.2 Create firebase_config.json
 ```bash
-cd /home/pi/wmldad/rpi
-
-cat > firebase_config.json << 'EOF'
-{
-  "apiKey": "YOUR_API_KEY_HERE",
-  "authDomain": "your-project.firebaseapp.com",
-  "databaseURL": "https://your-project-default-rtdb.asia-southeast1.firebasedatabase.app",
-  "projectId": "your-project",
-  "storageBucket": "your-project.appspot.com",
-  "messagingSenderId": "123456789",
-  "appId": "1:123456789:web:abcdef123456"
-}
+# Create udev rule
+cat > /tmp/99-esp32.rules << 'EOF'
+# CP2102 (ESP32 Dev Module)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
+# CH340 (some ESP32 boards)
+SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
+# ESP32-S3 native USB
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
 EOF
+
+sudo mv /tmp/99-esp32.rules /etc/udev/rules.d/99-esp32.rules
+
+# Apply rules
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+
+# Add pi user to dialout group (for serial access)
+sudo usermod -a -G dialout pi
+
+# Verify (after reconnecting ESP32 via USB)
+ls -la /dev/ttyESP32
+# Should show symlink to ttyUSB0 or ttyUSB1
 ```
 
-> **Replace ALL values** with your actual Firebase config.
-
-### 12.3 Create .env File
-```bash
-cat > .env << 'EOF'
-FIREBASE_EMAIL=esp32@your-project.iam.gserviceaccount.com
-FIREBASE_PASSWORD=your-strong-password-here
-DEVICE_ID=wm_001
-FLASK_HOST=0.0.0.0
-FLASK_PORT=5000
-EOF
-```
-
-> **Important:** The email/password must match a user created in Firebase Console → **Authentication** → **Sign-in method** → **Email/Password** → **Add user**.
-
-### 12.4 Verify Config
-```bash
-python3 -c "
-import json, os
-from dotenv import load_dotenv
-load_dotenv()
-
-with open('firebase_config.json') as f:
-    config = json.load(f)
-print('Firebase config loaded:')
-for k, v in config.items():
-    print(f'  {k}: {v[:20]}...' if len(v) > 20 else f'  {k}: {v}')
-
-print()
-print('Environment variables:')
-print(f'  FIREBASE_EMAIL: {os.getenv(\"FIREBASE_EMAIL\")}')
-print(f'  DEVICE_ID: {os.getenv(\"DEVICE_ID\")}')
-"
-```
+> **Note:** Log out and back in (or reboot) for group changes to take effect.
 
 ---
 
@@ -445,6 +420,7 @@ print(f'  DEVICE_ID: {os.getenv(\"DEVICE_ID\")}')
 Create all backend files in `/home/pi/wmldad/rpi/`. Each file is created with `cat > filename << 'EOF'`.
 
 ### 13.1 Create ml_inference.py (XGBoost + Isolation Forest)
+
 ```bash
 cat > ml_inference.py << 'PYEOF'
 """
@@ -464,7 +440,7 @@ logger = logging.getLogger(__name__)
 
 class LeakDetector:
     """Production leak detector combining XGBoost + Isolation Forest."""
-    
+
     def __init__(
         self,
         xgb_path: str = 'models/xgboost_model.json',
@@ -487,7 +463,7 @@ class LeakDetector:
         self.inference_count = 0
         
         self._load_models()
-    
+
     def _load_models(self):
         """Load all model artifacts"""
         try:
@@ -641,189 +617,239 @@ def load_deployment_package(model_dir: str = 'models') -> Dict[str, Any]:
 PYEOF
 ```
 
----
+### 13.2 Create serial_reader.py (pyserial + asyncio)
 
-### 13.2 Create firebase_listener.py (Pyrebase4 Polling)
 ```bash
-cat > firebase_listener.py << 'PYEOF'
+cat > serial_reader.py << 'PYEOF'
 """
-Firebase Listener — Polls Firebase Realtime DB for new sensor readings
-using Pyrebase4 (Email/Password auth).
+ESP32 Serial Reader — Reads JSON Lines from ESP32 via USB Serial
+with auto-reconnect and auto port detection.
 """
 
-import pyrebase
 import json
-import threading
 import time
+import threading
 import logging
-from datetime import datetime
-from typing import Optional, Callable, Dict, Any
+from typing import Callable, Optional, Dict, Any
+from dataclasses import dataclass
+from serial_port import get_serial_connection, find_esp32_port
+import serial
 
 logger = logging.getLogger(__name__)
 
 
-class FirebaseListener:
-    """Polls Firebase for new readings, runs ML inference, writes alerts."""
-    
+@dataclass
+class SensorReading:
+    inlet: Dict[str, Any]
+    bidet: Dict[str, Any]
+    kitchen: Dict[str, Any]
+    bathroom_shower: Dict[str, Any]
+    device_id: str
+    uptime_ms: int
+    free_heap: int
+    rssi: int
+    timestamp: float
+
+
+class ESP32SerialReader:
+    """Reads JSON sensor data from ESP32 via USB serial with auto-reconnect."""
+
     def __init__(
         self,
-        config_path: str,
-        email: str,
-        password: str,
-        device_id: str,
-        poll_interval: int = 5
+        on_reading: Callable[[SensorReading], None],
+        on_error: Optional[Callable[[Exception], None]] = None,
+        baudrate: int = 921600,
+        reconnect_delay: float = 5.0
     ):
-        self.device_id = device_id
-        self.poll_interval = poll_interval
-        self.email = email
-        self.password = password
-        self.last_timestamp = None
-        self.running = False
-        self._detector = None
-        self._alert_engine = None
-        self._poll_thread: Optional[threading.Thread] = None
-        
-        # Load Firebase config
-        with open(config_path, 'r') as f:
-            self.firebase_config = json.load(f)
-        
-        # Initialize Pyrebase4
-        self.firebase = pyrebase.initialize_app(self.firebase_config)
-        self.auth = self.firebase.auth()
-        self.db = self.firebase.database()
-        
-        # Sign in
-        self._sign_in()
-        
-        # Database references
-        self.readings_ref = self.db.child(f"readings/{device_id}")
-        self.alerts_ref = self.db.child(f"alerts/{device_id}")
-        self.commands_ref = self.db.child(f"commands/{device_id}")
-        self.device_ref = self.db.child(f"devices/{device_id}")
-    
-    def _sign_in(self):
-        """Authenticate with Firebase."""
-        try:
-            self.user = self.auth.sign_in_with_email_and_password(
-                self.email, self.password
-            )
-            self.id_token = self.user['idToken']
-            self.refresh_token = self.user['refreshToken']
-            logger.info("Firebase authentication successful")
-        except Exception as e:
-            logger.error(f"Firebase auth failed: {e}")
-            raise
-    
-    def _refresh_token(self):
-        """Refresh expired auth token."""
-        try:
-            self.user = self.auth.refresh(self.refresh_token)
-            self.id_token = self.user['idToken']
-            logger.info("Token refreshed")
-        except Exception as e:
-            logger.warning(f"Token refresh failed, re-authenticating: {e}")
-            self._sign_in()
-    
-    def set_detector(self, detector):
-        """Set ML detector for inference."""
-        self._detector = detector
-    
-    def set_alert_engine(self, alert_engine):
-        """Set alert engine for notifications."""
-        self._alert_engine = alert_engine
+        self.on_reading = on_reading
+        self.on_error = on_error
+        self.baudrate = baudrate
+        self.reconnect_delay = reconnect_delay
+        self._running = False
+        self._thread: Optional[threading.Thread] = None
+        self._serial: Optional[serial.Serial] = None
+        self._buffer = ""
     
     def start(self):
-        """Start polling thread."""
-        if self.running:
+        """Start reading thread."""
+        if self._running:
             return
-        self.running = True
-        self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
-        self._poll_thread.start()
-        logger.info("Firebase listener started")
+        self._running = True
+        self._thread = threading.Thread(target=self._read_loop, daemon=True)
+        self._thread.start()
+        logger.info("ESP32 serial reader started")
     
     def stop(self):
-        """Stop polling thread."""
-        self.running = False
-        if self._poll_thread:
-            self._poll_thread.join(timeout=5)
-        logger.info("Firebase listener stopped")
+        """Stop reading thread."""
+        self._running = False
+        if self._serial:
+            self._serial.close()
+        if self._thread:
+            self._thread.join(timeout=5)
+        logger.info("ESP32 serial reader stopped")
     
-    def _poll_loop(self):
-        """Main polling loop."""
-        while self.running:
+    def _read_loop(self):
+        while self._running:
             try:
-                self._check_new_readings()
+                # Get connection (auto-detects port)
+                if not self._serial or not self._serial.is_open:
+                    self._connect()
+                
+                # Read line
+                line = self._serial.readline().decode('utf-8', errors='ignore').strip()
+                if not line:
+                    continue
+                
+                # Parse JSON
+                self._process_line(line)
+                
+            except serial.SerialException as e:
+                logger.warning(f"Serial error: {e}. Reconnecting in {self.reconnect_delay}s...")
+                self._close_serial()
+                time.sleep(self.reconnect_delay)
             except Exception as e:
-                logger.error(f"Poll error: {e}")
-                if "permission" in str(e).lower() or "unauthorized" in str(e).lower():
-                    self._refresh_token()
-            time.sleep(self.poll_interval)
+                logger.error(f"Unexpected error: {e}")
+                if self.on_error:
+                    self.on_error(e)
+                time.sleep(1)
     
-    def _check_new_readings(self):
-        """Fetch latest reading from Firebase."""
-        readings = self.readings_ref.order_by_key().limit_to_last(1).get(self.id_token)
-        
-        if readings and readings.val():
-            for ts, data in readings.val().items():
-                if ts != self.last_timestamp:
-                    self.last_timestamp = ts
-                    self.process_reading(data, ts)
+    def _connect(self):
+        """Establish serial connection with auto port detection."""
+        while self._running:
+            try:
+                self._serial = get_serial_connection(baudrate=921600, timeout=1.0)
+                logger.info("Serial connection established")
+                self._buffer = ""
+                return
+            except RuntimeError as e:
+                logger.warning(f"Connection failed: {e}. Retrying in {self.reconnect_delay}s...")
+                time.sleep(self.reconnect_delay)
+            except Exception as e:
+                logger.error(f"Unexpected connection error: {e}")
+                time.sleep(self.reconnect_delay)
     
-    def process_reading(self, data: Dict, timestamp: str):
-        """Extract features, run ML inference, write alerts."""
-        if not self._detector:
+    def _close_serial(self):
+        if self._serial and self._serial.is_open:
+            try:
+                self._serial.close()
+            except:
+                pass
+            self._serial = None
+    
+    def _process_line(self, line: str):
+        """Parse JSON line and emit reading."""
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            logger.debug(f"Invalid JSON: {line[:100]}")
             return
         
-        try:
-            inlet = data.get('inlet', {})
+        # Validate required fields
+        required = ['device_id']
+        if not all(k in data for k in required):
+            logger.debug(f"Missing required fields: {data}")
+            return
+        
+        # Handle different message types
+        msg_type = data.get('type', 'data')
+        
+        if msg_type == 'data':
+            reading = SensorReading(
+                inlet=data.get('inlet', {}),
+                bidet=data.get('bidet', {}),
+                kitchen=data.get('kitchen', {}),
+                bathroom_shower=data.get('bathroom_shower', {}),
+                device_id=data.get('device_id', 'unknown'),
+                uptime_ms=data.get('uptime_ms', 0),
+                free_heap=data.get('free_heap', 0),
+                rssi=data.get('rssi', 0),
+                timestamp=time.time()
+            )
             
-            # Process each fixture (1-3)
-            for fixture_idx in [1, 2, 3]:
-                fixture_key = f'fixture_{fixture_idx}'
-                fixture = data.get(fixture_key, {})
-                
-                # Only process if water is flowing
-                if fixture.get('flow_rate', 0) > 0.01:
-                    features = self._extract_features(data, fixture_idx, fixture, inlet)
-                    result = self._detector.predict(features)
-                    
-                    if result['final'] != 'normal':
-                        self._write_alert(result, fixture_idx, fixture, inlet, timestamp)
-                        
-        except Exception as e:
-            logger.error(f"Error processing reading: {e}")
+            # Call callback
+            try:
+                self.on_reading(reading)
+            except Exception as e:
+                logger.error(f"Callback error: {e}")
+        
+        elif msg_type == 'alert':
+            logger.warning(f"ESP32 Alert: {data.get('message', 'Unknown')}")
+        
+        elif msg_type == 'status':
+            logger.info(f"ESP32 Status: {data}")
+
+
+# Integration with ML Pipeline
+def create_serial_reader_with_ml(detector, alert_engine=None):
+    """Factory function to create reader with ML inference."""
+    from ml_inference import LeakDetector
+    import logging
     
-    def _extract_features(self, data: Dict, fixture_idx: int, fixture: Dict, inlet: Dict):
-        """Extract 9 features from raw Firebase data."""
+    logger = logging.getLogger(__name__)
+    
+    def on_reading(reading: SensorReading):
+        logger.info(
+            f"Inlet: {reading.inlet.get('flow_rate', 0):.2f} L/min, "
+            f"Bidet: {reading.bidet.get('flow_rate', 0):.2f}, "
+            f"Kitchen: {reading.kitchen.get('flow_rate', 0):.2f}, "
+            f"Shower: {reading.bathroom_shower.get('flow_rate', 0):.2f}"
+        )
+        
+        # Run ML inference per fixture
+        for fixture_name in ['bidet', 'kitchen', 'bathroom_shower']:
+            fixture = getattr(reading, fixture_name)
+            if fixture.get('flow_rate', 0) > 0.01:
+                features = extract_features(reading, fixture_name)
+                result = detector.predict(features)
+                
+                if result['final'] != 'normal':
+                    logger.warning(
+                        f"LEAK: {result['final']} on {fixture_name} "
+                        f"(conf: {result.get('confidence', 0):.2f})"
+                    )
+                    # Write alert to DB if needed
+                    if alert_engine:
+                        alert_engine.send_notification({
+                            'alert_type': result['final'],
+                            'fixture': fixture_name,
+                            'confidence': result.get('confidence', 0),
+                            'details': result
+                        })
+
+    def extract_features(reading, fixture_name):
+        """Extract 9 features from sensor reading."""
         import numpy as np
         from datetime import datetime
+        
+        fixture = getattr(reading, fixture_name)
+        inlet = reading.inlet
         
         flow_rate = fixture.get('flow_rate', 0)
         volume = fixture.get('volume', 0)
         inlet_rate = inlet.get('flow_rate', 0)
         
-        # 1. Flow rate
-        # 2. Duration (approximate from volume/rate)
+        # Duration (approximate from volume/rate)
         duration = volume / max(flow_rate / 60, 0.01) if flow_rate > 0 else 0
         
-        # 3-4. Time features
+        # Time features
         now = datetime.now()
         hour = now.hour
         day = now.weekday()
         
-        # 5. Fixture ID
-        fixture_id = fixture_idx
+        # Fixture ID mapping
+        fixture_id_map = {'bidet': 1, 'kitchen': 2, 'bathroom_shower': 3}
+        fixture_id = fixture_id_map.get(fixture_name, 1)
         
-        # 6. Inlet ratio
+        # Inlet ratio
         inlet_ratio = inlet_rate / max(flow_rate, 0.01)
         
-        # 7. Rate variance (simplified)
+        # Rate variance (placeholder - would need rolling buffer)
         rate_variance = 0
         
-        # 8. Night flag
+        # Night flag
         is_night = 1 if (hour >= 22 or hour < 5) else 0
         
-        # 9. Pulse trend (simplified)
+        # Pulse trend (placeholder)
         pulse_trend = 0
         
         return np.array([[
@@ -831,108 +857,207 @@ class FirebaseListener:
             inlet_ratio, rate_variance, is_night, pulse_trend
         ]], dtype=np.float32)
     
-    def _write_alert(self, result: Dict, fixture_idx: int, fixture: Dict, inlet: Dict, timestamp: str):
-        """Write alert to Firebase /alerts."""
-        fixture_names = {1: 'bidet', 2: 'kitchen', 3: 'bathroom_shower'}
-        
-        alert_data = {
-            'alert_type': result['final'],
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'confidence': result.get('confidence', 0),
-            'fixture_index': fixture_idx,
-            'fixture_name': fixture_names.get(fixture_idx),
-            'action': 'monitoring',
-            'details': {
-                'flow_rate': fixture.get('flow_rate', 0),
-                'inlet_flow_rate': inlet.get('flow_rate', 0),
-                'xgboost_class': result['xgboost']['class'],
-                'xgboost_confidence': result['xgboost']['confidence'],
-                'isolation_forest_anomaly': result['isolation_forest']['anomaly'],
-                'isolation_forest_score': result['isolation_forest']['score']
-            }
-        }
-        
-        try:
-            self.alerts_ref.push(alert_data, self.id_token)
-            logger.warning(f"⚠️ ALERT: {result['final']} on fixture {fixture_idx} (conf: {result.get('confidence', 0):.2f})")
-            
-            # Send notification
-            if self._alert_engine:
-                self._alert_engine.send_notification(alert_data)
-        except Exception as e:
-            logger.error(f"Failed to write alert: {e}")
-    
-    def get_latest_reading(self):
-        """Get latest reading for API."""
-        readings = self.readings_ref.order_by_key().limit_to_last(1).get(self.id_token)
-        return readings.val() if readings else None
-    
-    def get_recent_alerts(self, limit=20):
-        """Get recent alerts for API."""
-        alerts = self.alerts_ref.order_by_key().limit_to_last(limit).get(self.id_token)
-        return alerts.val() if alerts else None
-    
-    def send_command(self, command: str):
-        """Send command to ESP32 via Firebase."""
-        self.commands_ref.push({
-            'command': command,
-            'timestamp': datetime.utcnow().isoformat() + 'Z',
-            'source': 'dashboard'
-        }, self.id_token)
-    
-    def is_connected(self):
-        """Check Firebase connectivity."""
-        try:
-            self.db.child('.info/connected').get(self.id_token)
-            return True
-        except:
-            return False
-    
-    def reconnect(self):
-        """Force reconnection."""
-        logger.info("Reconnecting to Firebase...")
-        self._sign_in()
+    return ESP32SerialReader(on_reading=on_reading)
 PYEOF
 ```
 
----
+### 13.3 Create serial_port.py (auto-detection)
 
-### 13.3 Create alert_engine.py (In-App Notifications)
+```bash
+cat > serial_port.py << 'PYEOF'
+"""
+Serial Port Auto-Detection for ESP32
+Finds ESP32 on /dev/ttyUSB* or /dev/ttyACM* by VID:PID
+"""
+
+import glob
+import serial
+import logging
+import os
+
+logger = logging.getLogger(__name__)
+
+ESP32_VID_PID = [
+    (0x10c4, 0xea60),  # CP2102/CP2104 (ESP32 Dev Module)
+    (0x1a86, 0x7523),  # CH340
+    (0x303a, 0x1001),  # ESP32-S3 native USB
+]
+
+
+def find_esp32_port() -> str | None:
+    """
+    Auto-detect ESP32 serial port.
+    Checks /dev/ttyUSB* and /dev/ttyACM* for known ESP32 VID:PID.
+    Returns first matching port or None.
+    """
+    candidates = glob.glob('/dev/ttyUSB*') + glob.glob('/dev/ttyACM*')
+    
+    for port in candidates:
+        try:
+            if _is_esp32_device(port):
+                logger.info(f"Found ESP32 on {port}")
+                return port
+        except (OSError, PermissionError) as e:
+            logger.debug(f"Cannot access {port}: {e}")
+            continue
+    
+    logger.warning("No ESP32 device found on any ttyUSB/ttyACM port")
+    return None
+
+
+def _is_esp32_device(port: str) -> bool:
+    """Check if port matches known ESP32 VID:PID via sysfs."""
+    import os
+    try:
+        # Get device path: /dev/ttyUSB0 -> /sys/bus/usb-serial/devices/ttyUSB0
+        port_name = os.path.basename(port)
+        sysfs_path = f"/sys/bus/usb-serial/devices/{port_name}"
+        
+        if not os.path.exists(sysfs_path):
+            # Try alternative: /sys/bus/usb/devices/
+            for usb_dev in glob.glob('/sys/bus/usb/devices/*/idVendor'):
+                try:
+                    with open(usb_dev) as f:
+                        vid = int(f.read().strip(), 16)
+                    pid_path = usb_dev.replace('idVendor', 'idProduct')
+                    with open(pid_path) as f:
+                        pid = int(f.read().strip(), 16)
+                    if (vid, pid) in ESP32_VID_PID:
+                        # Check if this USB device has our tty
+                        tty_path = os.path.join(os.path.dirname(usb_dev), port_name)
+                        if os.path.exists(tty_path):
+                            return True
+                except:
+                    continue
+            return False
+        
+        # Read VID/PID from sysfs
+        vid_path = os.path.join(sysfs_path, '../idVendor')
+        pid_path = os.path.join(sysfs_path, '../idProduct')
+        
+        if os.path.exists(vid_path) and os.path.exists(pid_path):
+            with open(vid_path) as f:
+                vid = int(f.read().strip(), 16)
+            with open(pid_path) as f:
+                pid = int(f.read().strip(), 16)
+            return (vid, pid) in ESP32_VID_PID
+    except Exception:
+        pass
+    return False
+
+
+def get_serial_connection(baudrate: int = 921600, timeout: float = 1.0) -> serial.Serial:
+    """
+    Get serial connection to ESP32 with auto port detection.
+    Raises RuntimeError if no ESP32 found.
+    """
+    port = find_esp32_port()
+    if not port:
+        raise RuntimeError("No ESP32 device found. Check USB connection.")
+    
+    logger.info(f"Connecting to ESP32 on {port} at {baudrate} baud")
+    return serial.Serial(
+        port=port,
+        baudrate=baudrate,
+        timeout=1.0,
+        write_timeout=1.0,
+        bytesize=serial.EIGHTBITS,
+        parity=serial.PARITY_NONE,
+        stopbits=serial.STOPBITS_ONE,
+        rtscts=False,
+        dsrdtr=False
+    )
+PYEOF
+```
+
+### 13.4 Create alert_engine.py
+
 ```bash
 cat > alert_engine.py << 'PYEOF'
 """
-Alert Engine — In-app notifications via Firebase /alerts
-The web dashboard polls /api/alerts and displays alerts in real-time.
+Alert Engine — In-app notifications via dashboard polling /api/alerts
 """
 
 import logging
 from typing import Dict, Any
+import sqlite3
+from pathlib import Path
+import time
 
 logger = logging.getLogger(__name__)
 
 
 class AlertEngine:
-    """Handles in-app alert notifications."""
+    """Handles in-app alert notifications via database + API polling."""
     
-    def __init__(self):
-        # In-app notifications are handled by writing to Firebase /alerts
-        # The Flask dashboard (JavaScript) polls /api/alerts and displays them
-        # No external dependencies (email, SMS, push) required
-        pass
+    def __init__(self, db_path: str = 'data/alerts.db'):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._init_db()
+    
+    def _init_db(self):
+        """Initialize SQLite database for alerts."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    alert_type TEXT NOT NULL,
+                    fixture TEXT,
+                    confidence REAL,
+                    details TEXT,
+                    timestamp REAL NOT NULL,
+                    acknowledged INTEGER DEFAULT 0
+                )
+            ''')
+            conn.execute('CREATE INDEX IF NOT EXISTS idx_timestamp ON alerts(timestamp)')
+            conn.commit()
     
     def send_notification(self, alert_data: Dict[str, Any]):
         """
         Send notification for alert.
         
-        The alert is already written to Firebase /alerts by firebase_listener.
-        This method is a hook for future extensions (email, webhook, etc.).
+        The alert is written to SQLite database.
+        The Flask dashboard polls /api/alerts and displays them in real-time.
         """
-        logger.info(f"Notification sent for: {alert_data['alert_type']} on {alert_data.get('fixture_name')}")
+        alert_type = alert_data.get('alert_type', 'unknown')
+        fixture = alert_data.get('fixture', 'unknown')
+        confidence = alert_data.get('confidence', 0)
+        details = alert_data.get('details', {})
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('''
+                INSERT INTO alerts (alert_type, fixture, confidence, details, timestamp)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (alert_type, fixture, confidence, str(details), time.time()))
+            conn.commit()
+        
+        logger.info(f"Notification stored: {alert_type} on {fixture} (conf: {confidence:.2f})")
         
         # Future: add email, webhook, Telegram, etc.
-        # Example:
-        # if alert_data['alert_type'] in ['major_leak']:
+        # if alert_type == 'major_leak':
         #     self._send_webhook(alert_data)
+    
+    def get_recent_alerts(self, limit: int = 20) -> list:
+        """Get recent alerts for API."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                'SELECT * FROM alerts ORDER BY timestamp DESC LIMIT ?',
+                (limit,)
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    
+    def acknowledge_alert(self, alert_id: int):
+        """Mark alert as acknowledged."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute('UPDATE alerts SET acknowledged = 1 WHERE id = ?', (alert_id,))
+            conn.commit()
+    
+    def get_unacknowledged_count(self) -> int:
+        """Get count of unacknowledged alerts."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute('SELECT COUNT(*) FROM alerts WHERE acknowledged = 0')
+            return cursor.fetchone()[0]
     
     def _send_webhook(self, alert_data: Dict):
         """Optional: send to external webhook."""
@@ -940,19 +1065,144 @@ class AlertEngine:
 PYEOF
 ```
 
----
+### 13.5 Create api_endpoints.py (Flask Blueprint)
 
-### 13.4 Create app.py (Flask Entry Point)
+```bash
+cat > api_endpoints.py << 'PYEOF'
+"""
+Flask API Endpoints — Dashboard data, alerts, commands
+"""
+
+from flask import Blueprint, jsonify, request, current_app
+import logging
+
+logger = logging.getLogger(__name__)
+
+api = Blueprint('api', __name__, url_prefix='/api')
+
+
+@api.route('/status')
+def status():
+    """System status endpoint."""
+    return jsonify({
+        'status': 'ok',
+        'serial_connected': current_app.serial_reader._serial is not None and current_app.serial_reader._serial.is_open if current_app.serial_reader else False,
+        'ml_loaded': current_app.detector.model_loaded if current_app.detector else False,
+        'uptime': 0  # Could add actual uptime
+    })
+
+
+@api.route('/readings/latest')
+def latest_readings():
+    """Get latest sensor readings."""
+    # This would come from the serial reader's last reading
+    # For now, return empty - dashboard polls serial reader directly
+    return jsonify({'message': 'Readings streamed via SSE'})
+
+
+@api.route('/readings/stream')
+def readings_stream():
+    """Server-Sent Events stream for real-time readings."""
+    from flask import Response
+    import json
+    import time
+    
+    def event_stream():
+        last_reading = None
+        while True:
+            # Get latest reading from app context
+            if hasattr(current_app, 'latest_reading') and current_app.latest_reading:
+                reading = current_app.latest_reading
+                if reading != last_reading:
+                    data = {
+                        'inlet': reading.inlet,
+                        'bidet': reading.bidet,
+                        'kitchen': reading.kitchen,
+                        'bathroom_shower': reading.bathroom_shower,
+                        'device_id': reading.device_id,
+                        'timestamp': reading.timestamp
+                    }
+                    yield f"data: {json.dumps(data)}\n\n"
+                    last_reading = reading
+            time.sleep(1)
+    
+    return Response(event_stream(), mimetype='text/event-stream')
+
+
+@api.route('/alerts')
+def get_alerts():
+    """Get recent alerts."""
+    limit = request.args.get('limit', 20, type=int)
+    alerts = current_app.alert_engine.get_recent_alerts(limit)
+    return jsonify({'alerts': alerts})
+
+
+@api.route('/alerts/<int:alert_id>/acknowledge', methods=['POST'])
+def acknowledge_alert(alert_id):
+    """Acknowledge an alert."""
+    current_app.alert_engine.acknowledge_alert(alert_id)
+    return jsonify({'success': True})
+
+
+@api.route('/alerts/unacknowledged_count')
+def unacknowledged_count():
+    """Get count of unacknowledged alerts."""
+    count = current_app.alert_engine.get_unacknowledged_count()
+    return jsonify({'count': count})
+
+
+@api.route('/command', methods=['POST'])
+def send_command():
+    """Send command to ESP32 via serial."""
+    data = request.get_json()
+    if not data or 'cmd' not in data:
+        return jsonify({'error': 'Missing cmd field'}), 400
+    
+    cmd = data['cmd']
+    
+    if current_app.serial_reader and current_app.serial_reader._serial and current_app.serial_reader._serial.is_open:
+        try:
+            import json
+            cmd_json = json.dumps(data) + '\n'
+            current_app.serial_reader._serial.write(cmd_json.encode('utf-8'))
+            return jsonify({'success': True, 'message': 'Command sent'})
+        except Exception as e:
+            logger.error(f"Failed to send command: {e}")
+            return jsonify({'error': str(e)}), 500
+    else:
+        return jsonify({'error': 'Serial not connected'}), 503
+
+
+@api.route('/models/info')
+def model_info():
+    """Get ML model metadata."""
+    if hasattr(current_app, 'ml_metadata'):
+        return jsonify(current_app.ml_metadata)
+    return jsonify({'error': 'No metadata available'})
+
+
+@api.route('/models/benchmark')
+def benchmark_model():
+    """Run ML inference benchmark."""
+    if current_app.detector:
+        result = current_app.detector.benchmark(100)
+        return jsonify(result)
+    return jsonify({'error': 'Detector not loaded'}), 503
+PYEOF
+```
+
+### 13.6 Create app.py (Flask Entry Point)
+
 ```bash
 cat > app.py << 'PYEOF'
 """
 Water Meter Leak Detection — Flask Backend
-Runs on Raspberry Pi, polls Firebase, runs ML inference, serves dashboard.
+Runs on Raspberry Pi, reads from ESP32 via USB Serial, runs ML inference, serves dashboard.
 """
 
 import os
 import logging
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, send_from_directory
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -966,723 +1216,236 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Local imports
-from firebase_listener import FirebaseListener
 from ml_inference import load_deployment_package
+from serial_reader import ESP32SerialReader, create_serial_reader_with_ml
 from alert_engine import AlertEngine
 from api_endpoints import api
+from serial_port import find_esp32_port
 
 # Flask app
-app = Flask(__name__)
+app = Flask(__name__, 
+            template_folder='templates',
+            static_folder='static')
 app.register_blueprint(api)
 
-# Configuration from environment
-FIREBASE_CONFIG_PATH = os.getenv('FIREBASE_CONFIG_PATH', 'firebase_config.json')
-FIREBASE_EMAIL = os.getenv('FIREBASE_EMAIL')
-FIREBASE_PASSWORD = os.getenv('FIREBASE_PASSWORD')
-DEVICE_ID = os.getenv('DEVICE_ID', 'wm_001')
+# Configuration
+FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
+FLASK_PORT = int(os.getenv('FLASK_PORT', '5000'))
+DEVICE_ID = os.getenv('DEVICE_ID', 'wmldad-001')
 
-# Global components
-firebase_listener = None
+# Global components (initialized in initialize_components)
+serial_reader = None
 detector = None
 alert_engine = None
+ml_metadata = {}
+
+# Store latest reading for SSE
+app.latest_reading = None
 
 
 def initialize_components():
     """Initialize all backend components."""
-    global firebase_listener, detector, alert_engine
+    global serial_reader, detector, alert_engine, ml_metadata
     
     logger.info("Initializing ML detector...")
     package = load_deployment_package('models')
     detector = package['detector']
+    ml_metadata = package['metadata']
     detector.warm_up()
     
-    # Log metadata
-    metadata = package['metadata']
-    logger.info(f"Model version: {metadata.get('version', 'unknown')}")
-    logger.info(f"Created: {metadata.get('created', 'unknown')}")
-    logger.info(f"Performance: {metadata.get('performance', {})}")
+    logger.info(f"✅ ML models loaded: XGBoost {ml_metadata.get('xgboost_version', 'unknown')}, IF {ml_metadata.get('isolation_forest_version', 'unknown')}")
+    logger.info(f"   Accuracy: {ml_metadata.get('accuracy', 'N/A')}%")
+    logger.info(f"   Training samples: {ml_metadata.get('training_samples', 'N/A')}")
     
-    logger.info("Initializing alert engine...")
-    alert_engine = AlertEngine()
+    # Attach to app for API access
+    app.detector = detector
+    app.ml_metadata = ml_metadata
     
-    logger.info("Initializing Firebase listener...")
-    firebase_listener = FirebaseListener(
-        config_path=FIREBASE_CONFIG_PATH,
-        email=FIREBASE_EMAIL,
-        password=FIREBASE_PASSWORD,
-        device_id=DEVICE_ID,
-        poll_interval=5
-    )
-    firebase_listener.set_detector(detector)
-    firebase_listener.set_alert_engine(alert_engine)
-    firebase_listener.start()
+    logger.info("Initializing Alert Engine...")
+    alert_engine = AlertEngine('data/alerts.db')
+    app.alert_engine = alert_engine
+    
+    logger.info("Initializing Serial Reader...")
+    
+    def on_reading(reading):
+        # Store for SSE stream
+        app.latest_reading = reading
+        
+        # Run ML inference per fixture
+        for fixture_name in ['bidet', 'kitchen', 'bathroom_shower']:
+            fixture = getattr(reading, fixture_name)
+            if fixture.get('flow_rate', 0) > 0.01:
+                features = extract_features(reading, fixture_name)
+                result = detector.predict(features)
+                
+                if result['final'] != 'normal':
+                    logger.warning(
+                        f"LEAK: {result['final']} on {fixture_name} "
+                        f"(conf: {result.get('confidence', 0):.2f})"
+                    )
+                    alert_engine.send_notification({
+                        'alert_type': result['final'],
+                        'fixture': fixture_name,
+                        'confidence': result.get('confidence', 0),
+                        'details': result
+                    })
+    
+    serial_reader = ESP32SerialReader(on_reading=on_reading)
+    app.serial_reader = serial_reader
+    serial_reader.start()
     
     logger.info("✅ All components initialized")
 
 
-# Initialize on startup
-initialize_components()
+def extract_features(reading, fixture_name):
+    """Extract 9 features from sensor reading."""
+    import numpy as np
+    from datetime import datetime
+    
+    fixture = getattr(reading, fixture_name)
+    inlet = reading.inlet
+    
+    flow_rate = fixture.get('flow_rate', 0)
+    volume = fixture.get('volume', 0)
+    inlet_rate = inlet.get('flow_rate', 0)
+    
+    # Duration (approximate from volume/rate)
+    duration = volume / max(flow_rate / 60, 0.01) if flow_rate > 0 else 0
+    
+    # Time features
+    now = datetime.now()
+    hour = now.hour
+    day = now.weekday()
+    
+    # Fixture ID mapping
+    fixture_id_map = {'bidet': 1, 'kitchen': 2, 'bathroom_shower': 3}
+    fixture_id = fixture_id_map.get(fixture_name, 1)
+    
+    # Inlet ratio
+    inlet_ratio = inlet_rate / max(flow_rate, 0.01)
+    
+    # Rate variance (placeholder)
+    rate_variance = 0
+    
+    # Night flag
+    is_night = 1 if (hour >= 22 or hour < 5) else 0
+    
+    # Pulse trend (placeholder)
+    pulse_trend = 0
+    
+    return np.array([[
+        flow_rate, duration, hour, day, fixture_id,
+        inlet_ratio, rate_variance, is_night, pulse_trend
+    ]], dtype=np.float32)
 
 
-# ==================== ROUTES ====================
-
+# Routes
 @app.route('/')
-def dashboard():
-    """Main dashboard page."""
-    return render_template('dashboard.html')
+def index():
+    """Serve main dashboard."""
+    return render_template('index.html')
 
 
-@app.route('/api/health')
+@app.route('/static/<path:path>')
+def serve_static(path):
+    """Serve static files."""
+    return send_from_directory('static', path)
+
+
+@app.route('/health')
 def health():
     """Health check endpoint."""
     return jsonify({
         'status': 'healthy',
-        'firebase_connected': firebase_listener.is_connected() if firebase_listener else False,
-        'model_loaded': detector.model_loaded if detector else False,
-        'device_id': DEVICE_ID
+        'serial': serial_reader._serial.is_open if serial_reader and serial_reader._serial else False,
+        'ml': detector.model_loaded if detector else False
     })
 
 
-@app.route('/api/latest')
-def api_latest():
-    """Get latest sensor reading."""
-    if not firebase_listener:
-        return jsonify({'error': 'Firebase listener not initialized'}), 503
-    
-    latest = firebase_listener.get_latest_reading()
-    return jsonify(latest) if latest else jsonify({})
-
-
-@app.route('/api/alerts')
-def api_alerts():
-    """Get recent alerts."""
-    if not firebase_listener:
-        return jsonify({'error': 'Firebase listener not initialized'}), 503
-    
-    alerts = firebase_listener.get_recent_alerts(limit=50)
-    return jsonify(alerts) if alerts else jsonify({})
-
-
-@app.route('/api/command', methods=['POST'])
-def api_command():
-    """Send command to ESP32 via Firebase."""
-    if not firebase_listener:
-        return jsonify({'error': 'Firebase listener not initialized'}), 503
-    
-    data = request.get_json()
-    if not data or 'command' not in data:
-        return jsonify({'error': 'Missing command'}), 400
-    
-    try:
-        firebase_listener.send_command(data['command'])
-        return jsonify({'status': 'sent', 'command': data['command']})
-    except Exception as e:
-        logger.error(f"Command send error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/benchmark')
-def benchmark():
-    """Run inference benchmark."""
-    if not detector:
-        return jsonify({'error': 'Detector not initialized'}), 503
-    
-    return jsonify(detector.benchmark(100))
-
-
-# ==================== MAIN ====================
-
 if __name__ == '__main__':
-    port = int(os.getenv('FLASK_PORT', 5000))
-    host = os.getenv('FLASK_HOST', '0.0.0.0')
+    initialize_components()
     
-    logger.info(f"Starting Flask on {host}:{port}")
-    app.run(host=host, port=port, debug=False, threaded=True)
-PYEOF
-```
-
----
-
-### 13.5 Create api_endpoints.py (API Blueprint)
-```bash
-cat > api_endpoints.py << 'PYEOF'
-"""
-API Endpoints Blueprint — Separated for modularity.
-"""
-
-from flask import Blueprint, request, jsonify
-import numpy as np
-import logging
-
-logger = logging.getLogger(__name__)
-api = Blueprint('api', __name__)
-
-
-def get_detector():
-    """Get detector instance from app context."""
-    from app import detector
-    return detector
-
-
-@api.route('/api/predict', methods=['POST'])
-def predict():
-    """Single prediction endpoint."""
+    logger.info(f"Starting Flask on {FLASK_HOST}:{FLASK_PORT}")
+    logger.info(f"Dashboard: http://water-meter.local:{FLASK_PORT}/")
+    logger.info(f"Touchscreen: Auto-launch Chromium kiosk mode")
+    
     try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No JSON data'}), 400
-        
-        features = extract_features_from_request(data)
-        
-        detector = get_detector()
-        result = detector.predict(features)
-        
-        return jsonify(result)
-    
-    except Exception as e:
-        logger.error(f"Prediction error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-
-def extract_features_from_request(data: dict) -> np.ndarray:
-    """Extract 9 features from request data."""
-    # If features already provided
-    if 'features' in data:
-        return np.array(data['features'], dtype=np.float32)
-    
-    # Otherwise build from raw Firebase reading
-    inlet = data.get('inlet', {})
-    fixture = data.get('fixture', {})
-    
-    return np.array([[
-        fixture.get('flow_rate', 0),
-        fixture.get('duration', 0),
-        data.get('hour', 12),
-        data.get('day', 0),
-        data.get('fixture_id', 1),
-        inlet.get('flow_rate', 0) / max(fixture.get('flow_rate', 0.01), 0.01),
-        0,  # rate_variance
-        1 if data.get('hour', 12) >= 22 or data.get('hour', 12) < 5 else 0,
-        0   # pulse_trend
-    ]], dtype=np.float32)
+        app.run(host=FLASK_HOST, port=FLASK_PORT, debug=False, threaded=True)
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+        if serial_reader:
+            serial_reader.stop()
 PYEOF
-```
-
----
-
-### 13.6 Create templates/dashboard.html
-```bash
-cat > templates/dashboard.html << 'HTMLEOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Water Meter Monitor</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4"></script>
-</head>
-<body>
-    <div class="container-fluid p-3">
-        <!-- Header -->
-        <div class="row mb-3">
-            <div class="col-12">
-                <h2 class="mb-0">💧 Water Meter Monitor</h2>
-                <small class="text-muted" id="last-update">Loading...</small>
-            </div>
-        </div>
-        
-        <!-- Status Cards -->
-        <div class="row mb-3" id="status-cards">
-            <!-- Inlet -->
-            <div class="col-6 col-md-3">
-                <div class="card sensor-card inlet-card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Inlet</h6>
-                        <div class="sensor-value" id="inlet-flow">-- L/min</div>
-                        <div class="sensor-sub">Total: <span id="inlet-total">-- L</span></div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Fixture 1: Bidet -->
-            <div class="col-6 col-md-3">
-                <div class="card sensor-card" id="fixture1-card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Bidet</h6>
-                        <div class="sensor-value" id="fix1-flow">-- L/min</div>
-                        <div class="sensor-sub">Total: <span id="fix1-total">-- L</span></div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Fixture 2: Kitchen -->
-            <div class="col-6 col-md-3">
-                <div class="card sensor-card" id="fixture2-card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Kitchen</h6>
-                        <div class="sensor-value" id="fix2-flow">-- L/min</div>
-                        <div class="sensor-sub">Total: <span id="fix2-total">-- L</span></div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Fixture 3: Shower -->
-            <div class="col-6 col-md-3">
-                <div class="card sensor-card" id="fixture3-card">
-                    <div class="card-body text-center">
-                        <h6 class="card-title">Shower</h6>
-                        <div class="sensor-value" id="fix3-flow">-- L/min</div>
-                        <div class="sensor-sub">Total: <span id="fix3-total">-- L</span></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Charts & Status -->
-        <div class="row mb-3">
-            <div class="col-md-8">
-                <div class="card">
-                    <div class="card-header">Flow Rate History (Last 50 readings)</div>
-                    <div class="card-body">
-                        <canvas id="flowChart" height="100"></canvas>
-                    </div>
-                </div>
-            </div>
-            <div class="col-md-4">
-                <div class="card">
-                    <div class="card-header">System Status</div>
-                    <div class="card-body">
-                        <div class="mb-2">
-                            <strong>Firebase:</strong> 
-                            <span class="badge bg-success" id="firebase-status">Connected</span>
-                        </div>
-                        <div class="mb-2">
-                            <strong>ML Model:</strong> 
-                            <span class="badge bg-success" id="ml-status">Loaded</span>
-                        </div>
-                        <div class="mb-2">
-                            <strong>Device:</strong> 
-                            <span id="device-id">wm_001</span>
-                        </div>
-                        <div class="mt-3">
-                            <button class="btn btn-sm btn-outline-primary" onclick="sendCommand('calibrate')">
-                                Calibrate
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger ms-2" onclick="sendCommand('reboot')">
-                                Reboot ESP32
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Alerts Table -->
-        <div class="row">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header d-flex justify-content-between">
-                        <h5 class="mb-0">Recent Alerts</h5>
-                        <button class="btn btn-sm btn-outline-secondary" onclick="loadAlerts()">Refresh</button>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover mb-0" id="alerts-table">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Time</th>
-                                        <th>Type</th>
-                                        <th>Fixture</th>
-                                        <th>Confidence</th>
-                                        <th>Details</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="alerts-body">
-                                    <tr><td colspan="5" class="text-center text-muted">Loading...</td></tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
-</body>
-</html>
-HTMLEOF
-```
-
----
-
-### 13.7 Create static/css/dashboard.css
-```bash
-cat > static/css/dashboard.css << 'CSSEOF'
-/* Water Meter Dashboard Styles */
-
-.sensor-card {
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-.sensor-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-}
-
-.inlet-card { border-top: 4px solid #0d6efd; }
-#fixture1-card { border-top: 4px solid #198754; }
-#fixture2-card { border-top: 4px solid #fd7e14; }
-#fixture3-card { border-top: 4px solid #6f42c1; }
-
-.sensor-value {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #212529;
-}
-.sensor-sub {
-    font-size: 0.85rem;
-    color: #6c757d;
-}
-
-.card-header {
-    background: #f8f9fa;
-    border-bottom: 1px solid #dee2e6;
-    font-weight: 600;
-}
-
-#flowChart {
-    max-height: 300px;
-}
-
-.alert-minor_leak { border-left: 4px solid #fd7e14; }
-.alert-major_leak { border-left: 4px solid #dc3545; }
-.alert-anomaly { border-left: 4px solid #6f42c1; }
-
-@media (max-width: 576px) {
-    .sensor-value { font-size: 1.2rem; }
-    .card-header { font-size: 0.9rem; }
-}
-CSSEOF
-```
-
----
-
-### 13.8 Create static/js/dashboard.js
-```bash
-cat > static/js/dashboard.js << 'JSEOF'
-// Water Meter Dashboard JavaScript
-
-let flowChart = null;
-let updateInterval = null;
-
-const FIXTURE_NAMES = {
-    1: 'Bidet',
-    2: 'Kitchen',
-    3: 'Bathroom Shower'
-};
-
-const ALERT_COLORS = {
-    'minor_leak': 'warning',
-    'major_leak': 'danger',
-    'anomaly': 'purple',
-    'normal': 'success'
-};
-
-// Initialize on load
-document.addEventListener('DOMContentLoaded', () => {
-    initFlowChart();
-    loadLatest();
-    loadAlerts();
-    startAutoRefresh();
-});
-
-function initFlowChart() {
-    const ctx = document.getElementById('flowChart').getContext('2d');
-    flowChart = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: [],
-            datasets: [
-                { label: 'Inlet', data: [], borderColor: '#0d6efd', backgroundColor: 'rgba(13,110,253,0.1)', fill: true, tension: 0.3 },
-                { label: 'Bidet', data: [], borderColor: '#198754', backgroundColor: 'rgba(25,135,84,0.1)', fill: true, tension: 0.3 },
-                { label: 'Kitchen', data: [], borderColor: '#fd7e14', backgroundColor: 'rgba(253,126,20,0.1)', fill: true, tension: 0.3 },
-                { label: 'Shower', data: [], borderColor: '#6f42c1', backgroundColor: 'rgba(111,66,193,0.1)', fill: true, tension: 0.3 }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { position: 'top' } },
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: 'L/min' } },
-                x: { display: false }
-            }
-        }
-    });
-}
-
-async function loadLatest() {
-    try {
-        const res = await fetch('/api/latest');
-        const data = await res.json();
-        
-        if (data && Object.keys(data).length > 0) {
-            updateDashboard(data);
-        }
-    } catch (e) {
-        console.error('Load latest failed:', e);
-        document.getElementById('firebase-status').className = 'badge bg-danger';
-        document.getElementById('firebase-status').textContent = 'Disconnected';
-    }
-}
-
-function updateDashboard(data) {
-    document.getElementById('last-update').textContent = `Last update: ${new Date().toLocaleTimeString()}`;
-    
-    // Inlet
-    const inlet = data.inlet || {};
-    document.getElementById('inlet-flow').textContent = `${inlet.flow_rate || 0} L/min`;
-    document.getElementById('inlet-total').textContent = `${inlet.total || 0} L`;
-    
-    // Fixtures
-    for (let i = 1; i <= 3; i++) {
-        const fix = data[`fixture_${i}`] || {};
-        document.getElementById(`fix${i}-flow`).textContent = `${fix.flow_rate || 0} L/min`;
-        document.getElementById(`fix${i}-total`).textContent = `${fix.total || 0} L`;
-    }
-    
-    // Update chart
-    updateChart(inlet, data);
-}
-
-function updateChart(inlet, data) {
-    const now = new Date().toLocaleTimeString();
-    const maxPoints = 50;
-    
-    flowChart.data.labels.push(now);
-    flowChart.data.datasets[0].data.push(inlet.flow_rate || 0);
-    
-    for (let i = 1; i <= 3; i++) {
-        const fix = data[`fixture_${i}`] || {};
-        flowChart.data.datasets[i].data.push(fix.flow_rate || 0);
-    }
-    
-    // Trim old points
-    if (flowChart.data.labels.length > maxPoints) {
-        flowChart.data.labels.shift();
-        flowChart.data.datasets.forEach(ds => ds.data.shift());
-    }
-    
-    flowChart.update('none');
-}
-
-async function loadAlerts() {
-    try {
-        const res = await fetch('/api/alerts');
-        const alerts = await res.json();
-        renderAlerts(alerts);
-    } catch (e) {
-        console.error('Load alerts failed:', e);
-    }
-}
-
-function renderAlerts(alerts) {
-    const tbody = document.getElementById('alerts-body');
-    if (!alerts || Object.keys(alerts).length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No alerts</td></tr>';
-        return;
-    }
-    
-    // Sort by timestamp descending
-    const sorted = Object.entries(alerts)
-        .sort((a, b) => b[1].timestamp.localeCompare(a[1].timestamp))
-        .slice(0, 20);
-    
-    tbody.innerHTML = sorted.map(([key, alert]) => {
-        const time = new Date(alert.timestamp).toLocaleTimeString();
-        const type = alert.alert_type || 'unknown';
-        const fixture = alert.fixture_name || `Fixture ${alert.fixture_index}`;
-        const conf = alert.confidence ? `${(alert.confidence * 100).toFixed(1)}%` : '--';
-        const color = ALERT_COLORS[type] || 'secondary';
-        
-        return `
-            <tr class="alert-${type}">
-                <td>${time}</td>
-                <td><span class="badge bg-${color}">${type.replace('_', ' ')}</span></td>
-                <td>${fixture}</td>
-                <td>${conf}</td>
-                <td>
-                    <small class="text-muted">
-                        Flow: ${alert.details?.flow_rate || 0} L/min | 
-                        Inlet: ${alert.details?.inlet_flow_rate || 0} L/min
-                    </small>
-                </td>
-            </tr>
-        `;
-    }).join('');
-}
-
-async function sendCommand(command) {
-    if (!confirm(`Send "${command}" command to ESP32?`)) return;
-    
-    try {
-        const res = await fetch('/api/command', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command })
-        });
-        const result = await res.json();
-        alert(`Command sent: ${result.command}`);
-    } catch (e) {
-        alert('Failed to send command');
-    }
-}
-
-function startAutoRefresh() {
-    updateInterval = setInterval(() => {
-        loadLatest();
-        loadAlerts();
-    }, 5000);
-}
-
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-    if (updateInterval) clearInterval(updateInterval);
-});
-JSEOF
 ```
 
 ---
 
 ## 14. Add ML Model Files
 
-### If you have trained models (from ml-complete-guide.md):
 ```bash
-# Copy from training machine to RPi:
-scp -r models/ pi@water-meter.local:~/wmldad/rpi/models/
+# Create models directory
+mkdir -p /home/pi/wmldad/rpi/models
+
+# After training in Google Colab/Jupyter, copy model files:
+# (these files are generated by ml-complete-guide.md training notebook)
+
+# From Google Colab: download from Files tab
+# From local Jupyter:
+cp /home/pi/wmldad/training/xgboost_model.json /home/pi/wmldad/rpi/models/
+cp /home/pi/wmldad/training/isolation_forest.pkl /home/pi/wmldad/rpi/models/
+cp /home/pi/wmldad/training/scaler.pkl /home/pi/wmldad/rpi/models/
+cp /home/pi/wmldad/training/iso_threshold.pkl /home/pi/wmldad/rpi/models/
+cp /home/pi/wmldad/training/feature_cols.pkl /home/pi/wmldad/rpi/models/
+cp /home/pi/wmldad/training/metadata.json /home/pi/wmldad/rpi/models/
+
+# Verify
+ls -la /home/pi/wmldad/rpi/models/
+# Should see: xgboost_model.json, isolation_forest.pkl, scaler.pkl, iso_threshold.pkl, feature_cols.pkl, metadata.json
 ```
-
-### If you DON'T have trained models yet (create placeholders for testing):
-```bash
-cd /home/pi/wmldad/rpi
-
-python3 << 'PYEOF'
-import xgboost as xgb
-import numpy as np
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import RobustScaler
-import joblib
-import json
-import os
-
-os.makedirs('models', exist_ok=True)
-
-# Dummy XGBoost
-xgb_model = xgb.XGBClassifier()
-xgb_model.fit(np.random.rand(100, 9), np.random.randint(0, 3, 100))
-xgb_model.save_model('models/xgboost_model.json')
-
-# Dummy Isolation Forest
-iforest = IsolationForest(contamination=0.05, random_state=42)
-iforest.fit(np.random.rand(100, 9))
-joblib.dump(iforest, 'models/isolation_forest.pkl')
-
-# Dummy Scaler
-scaler = RobustScaler()
-scaler.fit(np.random.rand(100, 9))
-joblib.dump(scaler, 'models/scaler.pkl')
-
-# Dummy Threshold
-joblib.dump(-0.5, 'models/iso_threshold.pkl')
-
-# Feature columns
-feature_cols = ['flow_rate', 'duration', 'hour', 'day', 'fixture_id',
-                'inlet_ratio', 'rate_variance', 'is_night', 'pulse_trend']
-joblib.dump(feature_cols, 'models/feature_cols.pkl')
-
-# Metadata
-with open('models/metadata.json', 'w') as f:
-    json.dump({
-        'version': '1.0-placeholder',
-        'created': '2026-07-14T00:00:00Z',
-        'feature_cols': feature_cols,
-        'target_names': ['normal', 'minor_leak', 'major_leak'],
-        'note': 'PLACEHOLDER - Replace with real trained models'
-    }, f, indent=2)
-
-print('Placeholder models created')
-PYEOF
-```
-
-> ⚠️ **Important:** Replace with real trained models from [ml-complete-guide.md](./ml-complete-guide.md) for production use.
 
 ---
 
 ## 15. Verify Installation
 
-### 15.1 Test ML Inference
 ```bash
-source /home/pi/wmldad/rpi/venv/bin/activate
 cd /home/pi/wmldad/rpi
+source venv/bin/activate
 
-python3 -c "
+# Quick test
+python -c "
 from ml_inference import load_deployment_package
-package = load_deployment_package('models')
-detector = package['detector']
-print('Model loaded:', detector.model_loaded)
-print('Features:', detector.n_features)
-print('Benchmark:', detector.benchmark(10))
+pkg = load_deployment_package('models')
+detector = pkg['detector']
+detector.warm_up()
+result = detector.predict([[2.5, 10, 14, 2, 1, 1.1, 0.5, 0, 0.1]])
+print('Test inference:', result)
+print('Benchmark:', detector.benchmark(50))
 "
-```
 
-### 15.2 Test Flask App Manually
-```bash
-# Terminal 1: Run Flask
-source /home/pi/wmldad/rpi/venv/bin/activate
-cd /home/pi/wmldad/rpi
+# Start Flask
 python app.py
-# Should show: * Running on all addresses (0.0.0.0:5000)
-
-# Terminal 2: Test endpoints
-curl http://localhost:5000/api/health
-# {"status":"healthy","firebase_connected":true,"model_loaded":true,"device_id":"wm_001"}
-
-curl http://localhost:5000/api/latest
-# Should show latest sensor reading
-
-curl http://localhost:5000/api/alerts
-# Should show alerts (or empty)
-
-# Dashboard
-# Open browser: http://water-meter.local:5000/
+# Should start on port 5000
+# Visit http://water-meter.local:5000/ in browser
 ```
-
-### 15.3 Verify Firebase Data Flow
-1. Open Firebase Console → Realtime Database
-2. Check `/readings/wm_001/` — new data every 5 seconds
-3. Check `/alerts/wm_001/` — alerts appear when leaks detected
-4. Check `/commands/wm_001/` — commands sent from dashboard
 
 ---
 
 ## 16. Systemd Service for Auto-start
 
 ### 16.1 Create Service File
+
 ```bash
-sudo tee /etc/systemd/system/water-meter.service > /dev/null << 'EOF'
+cat > /home/pi/wmldad/rpi/water-meter.service << 'EOF'
 [Unit]
 Description=Water Meter Leak Detection Backend
 After=network.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/wmldad/rpi
-Environment=PATH=/home/pi/wmldad/rpi/venv/bin
+Environment=PATH=/home/pi/wmldad/rpi/venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/home/pi/wmldad/rpi/venv/bin/python app.py
 Restart=always
 RestartSec=10
@@ -1694,270 +1457,105 @@ WantedBy=multi-user.target
 EOF
 ```
 
-### 16.2 Enable & Start
+### 16.2 Install & Enable Service
+
 ```bash
-# Reload systemd
+sudo cp /home/pi/wmldad/rpi/water-meter.service /etc/systemd/system/
 sudo systemctl daemon-reload
-
-# Enable on boot
 sudo systemctl enable water-meter.service
-
-# Start now
 sudo systemctl start water-meter.service
 
 # Check status
 sudo systemctl status water-meter.service
+# Should show: Active: active (running)
 
 # View logs
 journalctl -u water-meter.service -f
 ```
 
-### 16.3 Test Auto-start on Reboot
-```bash
-sudo reboot
-# Wait 60 seconds, then:
-curl http://water-meter.local:5000/api/health
-# Should return healthy status
-```
-
 ---
 
-## Quick Reference: Complete Command Summary
+## 17. Configure 800×480 Touchscreen Auto-Launch (Kiosk Mode)
 
 ```bash
-# ===== ONE-LINE SETUP (after SSH access) =====
-# Run each section separately, not as one script
-
-# 1. Update & tools
-sudo apt update && sudo apt full-upgrade -y && sudo apt install -y git python3-venv python3-dev build-essential libopenblas-dev libatlas-base-dev
-
-# 2. Clone project
-cd /home/pi && git clone https://github.com/qppd/wmldad.git && cd wmldad/rpi
-
-# 3. Virtual environment
-python3 -m venv venv && source venv/bin/activate
-
-# 4. Dependencies
-cat > requirements.txt << 'EOF'
-xgboost==2.0.3
-scikit-learn==1.3.2
-pandas==2.1.4
-numpy==1.24.3
-joblib==1.3.2
-flask==3.0.0
-pyrebase4==4.5.0
-gunicorn==21.2.0
-python-dotenv==1.0.0
-requests==2.31.0
-EOF
-pip install --no-cache-dir -r requirements.txt
-
-# 5. Firebase config
-cat > firebase_config.json << 'EOF'
-{ "apiKey": "YOUR_KEY", "authDomain": "proj.firebaseapp.com", "databaseURL": "https://proj-default-rtdb.region.firebasedatabase.app", "projectId": "proj", "storageBucket": "proj.appspot.com", "messagingSenderId": "123", "appId": "1:123:web:abc" }
+# Create autostart for Chromium kiosk
+mkdir -p /home/pi/.config/lxsession/LXDE-pi/
+cat > /home/pi/.config/lxsession/LXDE-pi/autostart << 'EOF'
+@lxpanel --profile LXDE-pi
+@pcmanfm --desktop --profile LXDE-pi
+@xscreensaver -no-splash
+@chromium-browser --noerrdialogs --disable-infobars --kiosk --incognito http://localhost:5000/
 EOF
 
-cat > .env << 'EOF'
-FIREBASE_EMAIL=esp32@proj.iam.gserviceaccount.com
-FIREBASE_PASSWORD=your-password
-DEVICE_ID=wm_001
-FLASK_HOST=0.0.0.0
-FLASK_PORT=5000
-EOF
+# Disable screen blanking
+echo -e "\n# Disable screen blanking\nxserver-command=X -s 0 -dpms" | sudo tee -a /etc/lightdm/lightdm.conf
 
-# 6. Models (placeholder or real)
-mkdir -p models
-python3 -c "
-import xgboost as xgb, numpy as np
-from sklearn.ensemble import IsolationForest
-from sklearn.preprocessing import RobustScaler
-import joblib, json, os
-os.makedirs('models', exist_ok=True)
-xgb.XGBClassifier().fit(np.random.rand(100,9), np.random.randint(0,3,100)).save_model('models/xgboost_model.json')
-joblib.dump(IsolationForest(contamination=0.05,random_state=42).fit(np.random.rand(100,9)), 'models/isolation_forest.pkl')
-joblib.dump(RobustScaler().fit(np.random.rand(100,9)), 'models/scaler.pkl')
-joblib.dump(-0.5, 'models/iso_threshold.pkl')
-joblib.dump(['flow_rate','duration','hour','day','fixture_id','inlet_ratio','rate_variance','is_night','pulse_trend'], 'models/feature_cols.pkl')
-json.dump({'version':'placeholder','note':'Replace with real models'}, open('models/metadata.json','w'))
-"
-
-# 7. Test
-python -c "from ml_inference import load_deployment_package; d=load_deployment_package('models'); print('OK:', d['detector'].benchmark(5))"
-
-# 8. Run manually
-python app.py
-# Visit http://water-meter.local:5000/
-
-# 9. Auto-start (optional)
-sudo tee /etc/systemd/system/water-meter.service > /dev/null << 'EOF'
-[Unit]
-Description=Water Meter Backend
-After=network.target
-[Service]
-Type=simple
-User=pi
-WorkingDirectory=/home/pi/wmldad/rpi
-Environment=PATH=/home/pi/wmldad/rpi/venv/bin
-ExecStart=/home/pi/wmldad/rpi/venv/bin/python app.py
-Restart=always
-RestartSec=10
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload && sudo systemctl enable water-meter && sudo systemctl start water-meter
-```
-
----
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| **Can't SSH** | Check IP: `hostname -I` on Pi. Use IP not hostname. Check `systemctl status ssh`. |
-| **VNC "Cannot connect"** | Ensure VNC enabled: `sudo raspi-config` → Interface Options → VNC. Set password: `sudo -u pi vncpasswd -service`. |
-| **pip install fails (xgboost)** | `sudo apt install -y libopenblas-dev libatlas-base-dev gfortran` then retry. |
-| **Firebase permission denied** | Check Security Rules in Firebase Console. Verify email/password user exists in Auth. |
-| **Module not found** | Ensure venv activated: `source /home/pi/wmldad/rpi/venv/bin/activate`. |
-| **Port 5000 in use** | `sudo lsof -i :5000` → kill process, or change `FLASK_PORT` in `.env`. |
-| **SD card full** | `df -h` → clean with `sudo apt clean`, `sudo journalctl --vacuum-time=7d`. |
-| **VNC no display / touchscreen not detected** | Add to `/boot/firmware/config.txt`: `hdmi_force_hotplug=1`, `hdmi_group=2`, `hdmi_mode=87`, `hdmi_cvt=800 480 60 6 0 0 0`. Reboot. |
-
----
-
-## 17. Touchscreen Setup (800×480 LCD)
-
-The Water Meter project includes a **7" Touchscreen LCD (800×480)** connected via HDMI + USB for touch input. This provides a local dashboard display without needing a remote computer.
-
-### 17.1 Hardware Connection
-| Connection | Pi Port | LCD Port |
-|------------|---------|----------|
-| HDMI | HDMI 0 (Pi 4/5) / HDMI (Pi 3B+) | HDMI input |
-| USB Touch | Any USB 2.0/3.0 | USB Micro-B (touch controller) |
-| Power | 5V GPIO pins (2/4) or USB | 5V input |
-
-> **Note:** Most 7" 800×480 touchscreens (Waveshare, Elecrow, generic) use HDMI for video and USB for touch. Some use DSI ribbon cable — check your specific model.
-
-### 17.2 Configure Display Resolution
-```bash
-# Edit config.txt
-sudo nano /boot/firmware/config.txt
-
-# Add/modify these lines for 800x480:
-hdmi_force_hotplug=1
-hdmi_group=2
-hdmi_mode=87
-hdmi_cvt=800 480 60 6 0 0 0
-hdmi_drive=2
-
-# For DSI displays (ribbon cable), use instead:
-# dtoverlay=vc4-kms-v3d
-# dtoverlay=waveshare-7inch-dsi  # or your specific overlay
-
-sudo reboot
-```
-
-### 17.3 Auto-launch Chromium in Kiosk Mode (Dashboard on Boot)
-Create a systemd user service to auto-start the dashboard on the touchscreen:
-
-```bash
-# Create autostart directory
-mkdir -p ~/.config/autostart
-
-# Create desktop entry for Chromium kiosk
-cat > ~/.config/autostart/chromium-kiosk.desktop << 'EOF'
-[Desktop Entry]
-Type=Application
-Name=Water Meter Dashboard
-Exec=chromium-browser --noerrdialogs --disable-infobars --kiosk --start-fullscreen http://localhost:5000/
-Hidden=false
-X-GNOME-Autostart-enabled=true
-EOF
-```
-
-### 17.4 Hide Mouse Cursor (Touch-Only)
-```bash
-# Install unclutter to hide mouse after inactivity
-sudo apt install -y unclutter
-
-# Create systemd user service for unclutter
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/unclutter.service << 'EOF'
-[Unit]
-Description=Hide mouse cursor for touchscreen
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/unclutter -idle 1 -root
-Restart=always
-
-[Install]
-WantedBy=default.target
-EOF
-
-# Enable and start
-systemctl --user daemon-reload
-systemctl --user enable unclutter.service
-systemctl --user start unclutter.service
-```
-
-### 17.5 Disable Screen Blanking
-```bash
-# Edit lightdm config (for desktop autologin)
-sudo nano /etc/lightdm/lightdm.conf
-
-# Under [Seat:*], add:
-[Seat:*]
-xserver-command=X -s 0 -dpms
-
-# Or via raspi-config:
+# Or via raspi-config
 sudo raspi-config
-# Display Options → Screen Blanking → Disable
-```
-
-### 17.6 Touchscreen Calibration (If Needed)
-```bash
-# Install calibration tool
-sudo apt install -y xinput-calibrator
-
-# Run calibration
-DISPLAY=:0 xinput_calibrator
-
-# Copy output to X11 config
-sudo mkdir -p /etc/X11/xorg.conf.d
-sudo nano /etc/X11/xorg.conf.d/99-calibration.conf
-
-# Paste the calibration matrix from xinput_calibrator output
-# Example:
-# Section "InputClass"
-#     Identifier "calibration"
-#     MatchProduct "Your Touchscreen Name"
-#     Option "Calibration" "min_x max_x min_y max_y"
-#     Option "SwapAxes" "0"
-# EndSection
-```
-
-### 17.7 Verify Touchscreen Works
-```bash
-# Check touch device detected
-ls /dev/input/ | grep -i touch
-
-# List input devices
-xinput list
-
-# Test: touch screen should move cursor / click
+# Display Options → Screen Blanking → No → Finish
 ```
 
 ---
 
-## Next Steps After Setup
+## 18. Remote Access Setup (Optional)
 
-1. **Hardware:** Wire ESP32 + 4× YF-S201 per [block-diagram.md](./block-diagram.md)
-2. **Firmware:** Flash ESP32 per [esp32-firmware-complete-guide.md](./esp32-firmware-complete-guide.md)
-3. **Calibrate:** Bucket test per [esp32-firmware-complete-guide.md](./esp32-firmware-complete-guide.md#sensor-calibration-bucket-test)
-4. **ML Training:** Follow [ml-complete-guide.md](./ml-complete-guide.md) for real models
-5. **Remote Access:** Configure Cloudflare Tunnel for HTTPS access from anywhere
+### Port Forwarding (Router)
+1. Log into router admin (192.168.1.1)
+2. **Port Forwarding:** External 8443 → Internal `water-meter.local:5000` (TCP)
+3. Access remotely: `http://your-external-ip:8443`
+
+### DDNS (DuckDNS - Free)
+```bash
+# Install duckdns updater
+sudo apt install -y curl
+# Create /home/pi/duckdns.sh with your token
+# Add to crontab: */5 * * * * /home/pi/duckdns.sh
+```
+
+### Cloudflare Tunnel (HTTPS, no port forward)
+```bash
+# Install cloudflared
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
+sudo dpkg -i cloudflared-linux-arm64.deb
+cloudflared tunnel login
+cloudflared tunnel create water-meter
+cloudflared tunnel route dns water-meter yourdomain.com
+# Run as service
+```
 
 ---
 
-*Last updated: July 2026 | Target: Raspberry Pi OS Trixie 64-bit | Compatible with Pi 3B+/4/5*
+## Quick Reference
+
+```bash
+# Clone repo
+git clone https://github.com/qppd/wmldad.git
+
+# Setup venv
+cd wmldad/rpi
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# USB Serial udev rule
+sudo cp /home/pi/wmldad/rpi/99-esp32.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules && sudo udevadm trigger
+sudo usermod -a -G dialout pi
+
+# Add models to models/
+
+# Run
+python app.py
+
+# Or as service
+sudo systemctl start water-meter.service
+journalctl -u water-meter.service -f
+```
+
+---
+
+## Dashboard Access
+
+- **Local:** `http://water-meter.local:5000/`
+- **Touchscreen:** Auto-launches Chromium kiosk on boot
+- **Remote:** `http://your-external-ip:8443/` (after port forward)

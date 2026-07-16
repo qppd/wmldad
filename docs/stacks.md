@@ -1,6 +1,6 @@
 # Technology Stack — Water Meter with Leak Detection
 
-> **Architecture:** Sensors → ESP32 → Firebase Realtime DB → RPi → XGBoost → Dashboard (7" touchscreen LCD on RPi + remote via port forwarding)
+> **Architecture:** Sensors → ESP32 → USB Serial (CDC/ACM) → RPi → XGBoost → Dashboard (7" touchscreen LCD on RPi + remote via port forwarding)
 
 ---
 
@@ -11,65 +11,42 @@
 | **Framework** | Arduino framework (esp32 core) | ≥ 2.0.x | Mature, well-documented, large ecosystem |
 | **IDE** | Arduino IDE 2.x | Latest | ESP32 board support, Library Manager, Serial Monitor |
 | **Language** | C++11/Arduino | — | Standard for ESP32 |
-| **Firebase** | [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) | ≥ 4.4.x | Full Firebase Realtime DB support — push, set, update, stream, auth |
-| **JSON** | Firebase-ESP-Client (built-in) | ≥ 4.4.x | Payload serialization for Firebase |
-| **WiFi** | WiFi.h (Arduino) | Built-in | Station mode, auto-reconnect |
+| **JSON** | [ArduinoJson](https://arduinojson.org/) | ≥ 7.x | Payload serialization for USB Serial |
+| **WiFi** | WiFi.h (Arduino) | Built-in | Station mode, auto-reconnect (for OTA + NTP only) |
 | **NTP** | NTPClient / configTime() | Built-in | Time sync for timestamped data |
 | **OTA** | ArduinoOTA | Built-in | Over-the-air firmware updates |
+| **SPIFFS** | SPIFFS (via LittleFS) | Built-in | Offline data logging |
 
-### Firebase-ESP-Client Usage
+### ArduinoJson Usage (v7+)
 
 ```cpp
-#include <Firebase_ESP_Client.h>
+#include <ArduinoJson.h>
 
-FirebaseData fbData;
-FirebaseData fbStream;
-FirebaseAuth fbAuth;
-FirebaseConfig fbConfig;
+JsonDocument doc;  // v7+ uses JsonDocument (replaces StaticJsonDocument)
 
-unsigned long dataMillis = 0;
-bool streamCommand = false;
+doc["device_id"] = "wmldad-001";
+doc["ts"] = millis();
+doc["sensor"] = 1;
+doc["gpio"] = 26;
+doc["pulses"] = 127;
+doc["flow_rate_lpm"] = 2.34;
+doc["volume_ml"] = 456;
 
-void setupFirebase() {
-    fbConfig.api_key = FIREBASE_API_KEY;
-    fbConfig.database_url = FIREBASE_DATABASE_URL;
-    
-    // Sign-in method: Email/Password
-    fbAuth.user.email = FIREBASE_USER_EMAIL;
-    fbAuth.user.password = FIREBASE_USER_PASSWORD;
-    
-    // Token callback
-    fbConfig.token_status_callback = tokenStatusCallback;
-    
-    Firebase.begin(&fbConfig, &fbAuth);
-    Firebase.reconnectWiFi(true);
-    
-    // Set buffer size for large payloads
-    fbData.setResponseSize(1024);
-    fbStream.setResponseSize(1024);
-    
-    // Start command stream
-    String streamPath = "/commands/" + String(DEVICE_ID);
-    if (Firebase.RTDB.beginStream(&fbStream, streamPath)) {
-        Serial.println("Firebase stream started on: " + streamPath);
-    }
-}
+serializeJson(doc, Serial);
+Serial.println();  // Newline delimiter for JSON Lines
 ```
 
 ---
 
-## Firebase Realtime DB
+## USB Serial Communication Stack
 
-| Feature | Usage |
-|---------|-------|
-| **Data structure** | JSON tree: `/readings/{device_id}/{timestamp}`, `/alerts/{alert_id}`, `/commands/{device_id}` |
-| **Authentication** | Email/Password for ESP32 and RPi (Pyrebase4); Anonymous for ESP32 optional |
-| **Security Rules** | Validate schema, restrict write paths per device |
-| **Streaming** | ESP32 listens on `/commands`, RPi polls `/readings` via Pyrebase4 |
-| **Storage** | Free tier: 1 GB, 100 simultaneous connections, 10 GB/month bandwidth |
-| **Pricing** | Spark (free) is sufficient for 1–5 devices. Blaze (pay-as-you-go) for production. |
-
-> Full schema: [Firebase Realtime DB Schema](./firebase-realtime-db.md)
+| Layer | Technology | Protocol | Details |
+|-------|------------|----------|---------|
+| **Physical** | USB Micro-B / USB-C cable | USB 2.0 | Data + power (5V backup) |
+| **CDC/ACM** | CP2102 / CH340 USB-UART bridge | UART | Appears as `/dev/ttyUSB0` or `/dev/ttyUSB1` on RPi |
+| **Baud Rate** | 921600 | — | High throughput for 4 sensors @ 5s interval |
+| **Format** | JSON Lines (NDJSON) | UTF-8 | One JSON object per line |
+| **RPi Driver** | pyserial + asyncio | Python | Auto-detects ESP32 via VID:PID |
 
 ---
 
@@ -78,22 +55,23 @@ void setupFirebase() {
 | Layer | Technology | Version | Purpose |
 |-------|------------|---------|---------|
 | **Hardware** | Raspberry Pi 3B+/4/5 | — | Local always-on Flask server, ML inference |
-| **OS** | Raspberry Pi OS (64-bit) | Bookworm | Stable Linux distribution for ARM |
-| **Language** | Python | ≥ 3.11 | ML ecosystem, Firebase SDK |
-| **Web Framework** | Flask | ≥ 2.x | Web dashboard + REST API endpoints |
-| **Firebase Client** | [Pyrebase4](https://github.com/nhorvath/Pyrebase4) | ≥ 4.5 | Firebase Realtime DB read/write via Email/Password auth |
+| **OS** | Raspberry Pi OS (64-bit) | Trixie (Debian 13) | Stable Linux distribution for ARM |
+| **Language** | Python | ≥ 3.11 | ML ecosystem, serial comms |
+| **Web Framework** | Flask | ≥ 3.0 | Web dashboard + REST API endpoints |
+| **Serial** | pyserial + asyncio | ≥ 3.5 | USB Serial reader with auto-reconnect |
 | **ML (primary)** | [XGBoost](https://xgboost.readthedocs.io/) | ≥ 2.0 | Gradient-boosted decision tree — leak classification |
 | **ML (anomaly)** | [scikit-learn](https://scikit-learn.org/) (IsolationForest) | ≥ 1.3 | Unsupervised anomaly detection |
 | **Data** | pandas, numpy | Latest | Feature engineering |
 | **Scheduling** | systemd + cron | Built-in | Daily model retraining via cron |
 | **Templates** | Jinja2 + Chart.js | — | Dashboard HTML/JS |
+| **Storage** | SQLite / InfluxDB | — | Time-series data storage |
 
 ---
 
 ## ML Model Stack
 
 | Model | Type | Framework | Task | Where it runs |
-|-------|------|-----------|------|--------------|
+|-------|------|-----------|------|---------------|
 | **XGBoost** | Gradient-boosted decision tree | xgboost Python | 3-class classification (normal, minor_leak, major_leak) | RPi (Flask) |
 | **Isolation Forest** | Unsupervised ensemble | scikit-learn | Binary anomaly/not-anomaly | RPi (Flask) |
 
@@ -102,7 +80,7 @@ void setupFirebase() {
 | Feature | Description | Type | Range |
 |---------|-------------|------|-------|
 | `flow_rate` | Instantaneous flow rate (L/min) | float | 0–40 |
-| `duration_seconds` | Seconds since water started flowing | int | 0–3600 |
+| `duration_seconds` | Seconds since water started flowing | int | 0–3600+ |
 | `hour_of_day` | Hour (0–23) | int | 0–23 |
 | `day_of_week` | Day (0=Mon) | int | 0–6 |
 | `fixture_id` | One-hot encoded fixture | int | 0–3 |
@@ -142,12 +120,10 @@ void setupFirebase() {
 | Path | Protocol | Data Format | Frequency |
 |------|----------|-------------|-----------|
 | Sensor → ESP32 | Pulse (GPIO interrupt) | Rising edge | Continuous |
-| ESP32 → Firebase | HTTPS | JSON | Every 5–60s |
-| Firebase → ESP32 | SSE (stream) | JSON | Real-time |
-| Firebase → RPi | Poll (HTTP) | REST (Pyrebase4) | On load / every 5s |
-| RPi → Firebase | HTTPS (REST) | JSON | On ML result |
-| RPi → Firebase | HTTPS (Alert write) | JSON | On leak detection |
-| RPi → Notification | In-app (Firebase /alerts) | JSON | On leak alert |
+| ESP32 → RPi | USB CDC/ACM (UART) | JSON Lines | Every 5 sec |
+| RPi → ESP32 | USB CDC/ACM (UART) | JSON Commands | On demand |
+| User → Dashboard | HTTP/WebSocket | HTTPS | On demand |
+| Dashboard → Commands | Write to Serial | JSON | On demand |
 | **Remote → RPi** | **HTTPS (port forward)** | **HTML/JSON** | **On demand** |
 
 ---
@@ -159,7 +135,7 @@ void setupFirebase() {
 | **Arduino IDE** | Build, upload, and debug ESP32 firmware (C++) |
 | **Python 3.11+** | ML training, backend development |
 | **Jupyter / Google Colab** | ML model prototyping and experimentation |
-| **Firebase Console** | Database management, rules, authentication |
+| **Firebase Console** | *(Removed - no longer used)* |
 | **RPi console (ssh)** | Backend debugging, log viewing |
 | **Serial Monitor** | ESP32 debug output |
 | **Git + GitHub** | Version control |
@@ -170,9 +146,9 @@ void setupFirebase() {
 
 | Requirement | Chosen | Alternatives Considered | Why This Won |
 |-------------|--------|------------------------|--------------|
-| Firebase | Custom Node.js server, Supabase, AWS IoT | Managed real-time DB, built-in auth, no server maintenance |
-| Firebase-ESP-Client | HTTP client, MQTT, Blynk | Full Firebase API (stream + write), well-maintained |
-| **Pyrebase4** | firebase-admin | Email/Password auth, client-style API, works on RPi |
+| Firebase | **Removed - USB Serial** | Custom Node.js server, Supabase, AWS IoT | Zero monthly cost, no internet dependency, lower latency |
+| Firebase-ESP-Client | **ArduinoJson** | HTTP client, MQTT, Blynk | Simple, no dependencies, zero cloud cost |
+| **Pyrebase4** | **pyserial + asyncio** | firebase-admin | No auth tokens, no polling, instant local comms |
 | XGBoost | Random Forest, LightGBM, CNN | Best for tabular time-series |
 | Isolation Forest | Autoencoder, One-Class SVM | Unsupervised, low memory |
 | RPi (Raspberry Pi) | Heroku, Railway, cloud VPS | One-time cost, no monthly fees, full local control |
@@ -183,8 +159,8 @@ void setupFirebase() {
 
 ## Stack Summary
 
-- **ESP32**: Arduino + Firebase-ESP-Client → 4 flow sensors → Firebase Realtime DB (stream + write)
-- **Firebase**: Email/Password auth, Realtime DB, Security Rules
-- **RPi**: Flask + Pyrebase4 (polling) + XGBoost + Isolation Forest → Dashboard + Alerts
+- **ESP32**: Arduino + ArduinoJson → 4 flow sensors → USB Serial (921600 baud, JSON Lines)
+- **RPi**: Flask + pyserial (asyncio) + XGBoost + Isolation Forest → Dashboard + Alerts
 - **Dashboard**: 7" touchscreen (local) + remote via port forwarding
-- **Alerts**: In-app (Firebase /alerts) + optional webhook
+- **Alerts**: In-app (dashboard polls `/api/alerts`) + optional webhook
+- **No Firebase, no cloud dependency for core loop** — fully local, zero monthly cost

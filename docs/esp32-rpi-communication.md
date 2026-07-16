@@ -1,8 +1,8 @@
 # ESP32 ↔ Raspberry Pi Communication (USB Serial)
 
-> **Architecture:** ESP32 ↔ USB Cable (ttyUSB0/ttyUSB1) ↔ RPi (Python Serial)
-> **Protocol:** JSON over UART (115200 baud)
-> **Auto-detection:** RPi auto-detects ESP32 on ttyUSB0 or ttyUSB1
+> **Architecture:** ESP32 ↔ USB Cable (CDC/ACM) ↔ RPi (Python pyserial + asyncio)  
+> **Protocol:** JSON Lines over UART (921600 baud)  
+> **Auto-detection:** RPi auto-detects ESP32 on `/dev/ttyUSB0` or `/dev/ttyUSB1` via VID:PID
 
 ---
 
@@ -13,19 +13,19 @@
 3. [RPi Auto Port Detection](#rpi-auto-port-detection)
 4. [ESP32 Firmware (USB Serial)](#esp32-firmware-usb-serial)
 5. [RPi Python Serial Reader](#rpi-python-serial-reader)
-7. [Error Handling & Reconnection](#error-handling--reconnection)
-8. [Testing & Verification](#testing--verification)
+6. [Error Handling & Reconnection](#error-handling--reconnection)
+7. [Testing & Verification](#testing--verification)
 
 ---
 
 ## Communication Overview
 
 ```
-┌─────────────┐     USB Cable (UART)      ┌──────────────────┐
-│   ESP32     │ ─────────────────────────▶ │   Raspberry Pi   │
-│  (NodeMCU)  │ ◀───────────────────────── │   (Python Serial)│
-│  115200     │      JSON over UART        │  /dev/ttyUSB0/1  │
-└─────────────┘     115200 8N1            └──────────────────┘
+┌─────────────┐     USB Cable (CDC/ACM)      ┌──────────────────┐
+│   ESP32     │ ────────────────────────────▶ │   Raspberry Pi   │
+│  (NodeMCU)  │ ◀──────────────────────────── │   (Python Serial)│
+│  921600     │      JSON Lines over UART     │  /dev/ttyUSB0/1  │
+└─────────────┘     921600 8N1                └──────────────────┘
       │                                                  │
       │              Auto-detect on                      │
       │              /dev/ttyUSB0 or ttyUSB1             │
@@ -36,7 +36,7 @@
 
 | Direction | Method | Frequency | Payload | Transport |
 |-----------|--------|-----------|---------|-----------|
-| ESP32 → RPi | `Serial.println(JSON)` | Every 1-5 sec | Sensor readings | USB UART |
+| ESP32 → RPi | `Serial.println(JSON)` | Every 5 sec | Sensor readings | USB UART |
 | RPi → ESP32 | `Serial.write(JSON)` | On command | Commands/Config | USB UART |
 
 ---
@@ -59,6 +59,8 @@ Connect the ESP32 to the Raspberry Pi via a **micro-USB data cable** (not charge
 SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
 # CH340 (some ESP32 boards)
 SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", ATTRS{idProduct}=="7523", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
+# ESP32-S3 native USB
+SUBSYSTEM=="tty", ATTRS{idVendor}=="303a", ATTRS{idProduct}=="1001", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"
 
 # Apply:
 sudo udevadm control --reload-rules
@@ -74,6 +76,7 @@ Now ESP32 always appears as `/dev/ttyESP32` (symlink to ttyUSB0/1).
 import glob
 import serial
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +108,6 @@ def find_esp32_port() -> str | None:
 
 def _is_esp32_device(port: str) -> bool:
     """Check if port matches known ESP32 VID:PID via sysfs."""
-    import os
     try:
         # Get device path: /dev/ttyUSB0 -> /sys/bus/usb-serial/devices/ttyUSB0
         port_name = os.path.basename(port)
@@ -122,7 +124,7 @@ def _is_esp32_device(port: str) -> bool:
                         pid = int(f.read().strip(), 16)
                     if (vid, pid) in ESP32_VID_PID:
                         # Check if this USB device has our tty
-                        tty_path = os.path.join(os.path.dirname(usb_dev), f'{port_name}')
+                        tty_path = os.path.join(os.path.dirname(usb_dev), port_name)
                         if os.path.exists(tty_path):
                             return True
                 except:
@@ -143,7 +145,7 @@ def _is_esp32_device(port: str) -> bool:
         pass
     return False
 
-def get_serial_connection(baudrate: int = 115200, timeout: float = 1.0) -> serial.Serial | None:
+def get_serial_connection(baudrate: int = 921600, timeout: float = 1.0) -> serial.Serial:
     """
     Get serial connection to ESP32 with auto port detection.
     Raises exception if no ESP32 found.
@@ -152,7 +154,7 @@ def get_serial_connection(baudrate: int = 115200, timeout: float = 1.0) -> seria
     if not port:
         raise RuntimeError("No ESP32 device found. Check USB connection.")
     
-    logger.info(f"Connecting to ESP32 on {port} at 115200 baud")
+    logger.info(f"Connecting to ESP32 on {port} at {baudrate} baud")
     return serial.Serial(
         port=port,
         baudrate=baudrate,
@@ -175,7 +177,8 @@ def get_serial_connection(baudrate: int = 115200, timeout: float = 1.0) -> seria
 ```cpp
 // esp32/src/main.cpp
 #include <Arduino.h>
-```
+#include <ArduinoJson.h>
+
 // Sensor pins
 const uint8_t PIN_INLET = 26;
 const uint8_t PIN_FIX1 = 25;
@@ -205,7 +208,7 @@ void IRAM_ATTR pulseISR2() { if (millis() - lastPulseTime[2] > 5) { pulseCount[2
 void IRAM_ATTR pulseISR3() { if (millis() - lastPulseTime[3] > 5) { pulseCount[3]++; lastPulseTime[3] = millis(); } }
 
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(921600);
     while (!Serial) delay(10);
     
     // Setup pins
@@ -220,7 +223,7 @@ void setup() {
     attachInterrupt(digitalPinToInterrupt(PIN_FIX2), pulseISR2, RISING);
     attachInterrupt(digitalPinToInterrupt(PIN_FIX3), pulseISR3, RISING);
     
-    Serial.println("ESP32 Water Meter Ready");
+    Serial.println("{\"status\":\"ready\",\"device_id\":\"wmldad-001\",\"firmware\":\"v3.0.0-usb\"}");
 }
 
 void loop() {
@@ -264,7 +267,7 @@ void sendSensorData() {
     }
     
     // Device info
-    doc["device_id"] = "wm_001";
+    doc["device_id"] = "wmldad-001";
     doc["uptime_ms"] = millis();
     doc["free_heap"] = ESP.getFreeHeap();
     doc["rssi"] = WiFi.RSSI();
@@ -297,6 +300,12 @@ void handleCommand() {
         serializeJson(resp, Serial);
         Serial.println();
         ESP.restart();
+    } else if (strcmp(cmd, "reset_counters") == 0) {
+        for (int i = 0; i < 4; i++) {
+            pulseCount[i] = 0;
+            lastPulseTime[i] = 0;
+        }
+        resp["msg"] = "Counters reset";
     } else if (strcmp(cmd, "set_ppl") == 0) {
         int sensor = cmdDoc["sensor"] | 0;  // 0=inlet, 1-3=fixtures
         float ppl = cmdDoc["ppl"] | 450.0;
@@ -341,12 +350,12 @@ class SensorReading:
 
 class ESP32SerialReader:
     """Reads JSON sensor data from ESP32 via USB serial with auto-reconnect."""
-    
+
     def __init__(
         self,
         on_reading: Callable[[SensorReading], None],
         on_error: Optional[Callable[[Exception], None]] = None,
-        baudrate: int = 115200,
+        baudrate: int = 921600,
         reconnect_delay: float = 5.0
     ):
         self.on_reading = on_reading
@@ -405,7 +414,7 @@ class ESP32SerialReader:
         """Establish serial connection with auto port detection."""
         while self._running:
             try:
-                self._serial = get_serial_connection(baudrate=115200, timeout=1.0)
+                self._serial = get_serial_connection(baudrate=921600, timeout=1.0)
                 logger.info("Serial connection established")
                 self._buffer = ""
                 return
@@ -433,79 +442,115 @@ class ESP32SerialReader:
             return
         
         # Validate required fields
-        required = ['inlet', 'bidet', 'kitchen', 'bathroom_shower', 'device_id']
+        required = ['device_id']
         if not all(k in data for k in required):
             logger.debug(f"Missing required fields: {data}")
             return
         
-        reading = SensorReading(
-            inlet=data['inlet'],
-            bidet=data.get('bidet', {}),
-            kitchen=data.get('kitchen', {}),
-            bathroom_shower=data.get('bathroom_shower', {}),
-            device_id=data.get('device_id', 'unknown'),
-            uptime_ms=data.get('uptime_ms', 0),
-            free_heap=data.get('free_heap', 0),
-            rssi=data.get('rssi', 0),
-            timestamp=time.time()
+        # Handle different message types
+        msg_type = data.get('type', 'data')
+        
+        if msg_type == 'data':
+            reading = SensorReading(
+                inlet=data.get('inlet', {}),
+                bidet=data.get('bidet', {}),
+                kitchen=data.get('kitchen', {}),
+                bathroom_shower=data.get('bathroom_shower', {}),
+                device_id=data.get('device_id', 'unknown'),
+                uptime_ms=data.get('uptime_ms', 0),
+                free_heap=data.get('free_heap', 0),
+                rssi=data.get('rssi', 0),
+                timestamp=time.time()
+            )
+            
+            # Call callback
+            try:
+                self.on_reading(reading)
+            except Exception as e:
+                logger.error(f"Callback error: {e}")
+        
+        elif msg_type == 'alert':
+            logger.warning(f"ESP32 Alert: {data.get('message', 'Unknown')}")
+        
+        elif msg_type == 'status':
+            logger.info(f"ESP32 Status: {data}")
+
+# Integration with ML Pipeline
+def create_serial_reader_with_ml(detector, alert_engine=None):
+    """Factory function to create reader with ML inference."""
+    from ml_inference import LeakDetector
+    import numpy as np
+    from datetime import datetime
+    
+    logger = logging.getLogger(__name__)
+    
+    def on_reading(reading: SensorReading):
+        logger.info(
+            f"Inlet: {reading.inlet.get('flow_rate', 0):.2f} L/min, "
+            f"Bidet: {reading.bidet.get('flow_rate', 0):.2f}, "
+            f"Kitchen: {reading.kitchen.get('flow_rate', 0):.2f}, "
+            f"Shower: {reading.bathroom_shower.get('flow_rate', 0):.2f}"
         )
         
-        # Call callback
-        try:
-            self.on_reading(reading)
-        except Exception as e:
-            logger.error(f"Callback error: {e}")
-```
+        # Run ML inference per fixture
+        for fixture_name in ['bidet', 'kitchen', 'bathroom_shower']:
+            fixture = getattr(reading, fixture_name)
+            if fixture.get('flow_rate', 0) > 0.01:
+                features = extract_features(reading, fixture_name)
+                result = detector.predict(features)
+                
+                if result['final'] != 'normal':
+                    logger.warning(
+                        f"LEAK: {result['final']} on {fixture_name} "
+                        f"(conf: {result.get('confidence', 0):.2f})"
+                    )
+                    if alert_engine:
+                        alert_engine.send_notification({
+                            'alert_type': result['final'],
+                            'fixture': fixture_name,
+                            'confidence': result.get('confidence', 0),
+                            'details': result
+                        })
 
-### Integration with ML Pipeline
-
-```python
-# rpi/main.py
-from serial_reader import ESP32SerialReader, SensorReading
-from ml_inference import LeakDetector
-import logging
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# Initialize ML detector
-detector = LeakDetector(
-    xgb_path='models/xgboost_model.json',
-    iforest_path='models/isolation_forest.pkl',
-    scaler_path='models/scaler.pkl',
-    threshold_path='models/iso_threshold.pkl'
-)
-detector.warm_up()
-
-# Callback for serial readings
-def on_reading(reading: SensorReading):
-    logger.info(f"Inlet: {reading.inlet['flow_rate']:.2f} L/min, "
-                f"Bidet: {reading.bidet.get('flow_rate', 0):.2f}, "
-                f"Kitchen: {reading.kitchen.get('flow_rate', 0):.2f}, "
-                f"Shower: {reading.bathroom_shower.get('flow_rate', 0):.2f}")
-    
-    # Run ML inference per fixture
-    for fixture_name in ['bidet', 'kitchen', 'bathroom_shower']:
+    def extract_features(reading, fixture_name):
+        """Extract 9 features from sensor reading."""
         fixture = getattr(reading, fixture_name)
-        if fixture.get('flow_rate', 0) > 0.01:
-            features = extract_features(reading, fixture_name)  # 9 features
-            result = detector.predict(features)
-            
-            if result['final'] != 'normal':
-                logger.warning(f"LEAK: {result['final']} on {fixture_name} (conf: {result['confidence']:.2f})")
-                # Write alert to Firebase if needed
-                # firebase.write_alert(...)
-
-# Start serial reader
-reader = ESP32SerialReader(on_reading=on_reading)
-reader.start()
-
-# Keep main thread alive
-try:
-    while True:
-        time.sleep(1)
-except KeyboardInterrupt:
-    reader.stop()
+        inlet = reading.inlet
+        
+        flow_rate = fixture.get('flow_rate', 0)
+        volume = fixture.get('volume', 0)
+        inlet_rate = inlet.get('flow_rate', 0)
+        
+        # Duration (approximate from volume/rate)
+        duration = volume / max(flow_rate / 60, 0.01) if flow_rate > 0 else 0
+        
+        # Time features
+        now = datetime.now()
+        hour = now.hour
+        day = now.weekday()
+        
+        # Fixture ID mapping
+        fixture_id_map = {'bidet': 1, 'kitchen': 2, 'bathroom_shower': 3}
+        fixture_id = fixture_id_map.get(fixture_name, 1)
+        
+        # Inlet ratio
+        inlet_ratio = inlet_rate / max(flow_rate, 0.01)
+        
+        # Rate variance (placeholder - would need rolling buffer)
+        rate_variance = 0
+        
+        # Night flag
+        is_night = 1 if (hour >= 22 or hour < 5) else 0
+        
+        # Pulse trend (placeholder)
+        pulse_trend = 0
+        
+        return np.array([[
+            flow_rate, duration, hour, day, fixture_id,
+            inlet_ratio, rate_variance, is_night, pulse_trend
+        ]], dtype=np.float32)
+    
+    return ESP32SerialReader(on_reading=on_reading)
 ```
 
 ---
@@ -513,11 +558,13 @@ except KeyboardInterrupt:
 ## Error Handling & Reconnection
 
 ### ESP32 Side
+
 - **Watchdog timer**: `esp_task_wdt_init(30, true)` with `esp_task_wdt_reset()` in loop
-- **WiFi reconnect**: `WiFi.reconnect()` if disconnected
+- **WiFi reconnect**: `WiFi.reconnect()` if disconnected (for OTA only)
 - **Buffer management**: Reset pulse counters after each send interval
 
 ### RPi Side
+
 - **Auto-reconnect**: Exponential backoff (5s, 10s, 20s, max 60s)
 - **Port re-detection**: Re-scans `/dev/ttyUSB*` on each reconnect
 - **Buffer handling**: Accumulates partial lines, handles fragmented JSON
@@ -530,7 +577,7 @@ except KeyboardInterrupt:
 | "Board not found" / No device on `/dev/ttyUSB0` | Use **data cable** (not charge-only). Check `ls /dev/tty*`. Hold **BOOT** → press **EN** → release **BOOT** → upload. |
 | `Permission denied` on `/dev/ttyUSB0` | `sudo usermod -a -G dialout $USER && newgrp dialout` |
 | `esptool.py not found` | `pip3 install esptool` |
-| Upload succeeds but Serial Monitor shows garbage | Set baud to **115200** (match `Serial.begin(115200)`) |
+| Upload succeeds but Serial Monitor shows garbage | Set baud to **921600** (match `Serial.begin(921600)`) |
 | JSON parse errors | Check for stray debug `Serial.print()` calls mixing with JSON output |
 
 ---
@@ -538,17 +585,19 @@ except KeyboardInterrupt:
 ## Testing & Verification
 
 ### 1. Test Serial Connection
+
 ```bash
 # Find port
 ls /dev/ttyUSB*
 
 # Test with screen
-screen /dev/ttyUSB0 115200
+screen /dev/ttyUSB0 921600
 # Should see JSON lines every 5 seconds
 # Exit: Ctrl+A, then k, then y
 ```
 
 ### 2. Test Python Reader
+
 ```bash
 cd rpi
 python3 -c "
@@ -564,6 +613,7 @@ for _ in range(3):
 ```
 
 ### 3. Test Full Pipeline
+
 ```bash
 cd rpi
 python3 main.py
@@ -579,11 +629,10 @@ python3 main.py
 | Task | Command |
 |------|---------|
 | Find ESP32 port | `ls /dev/ttyUSB*` |
-| Test serial | `screen /dev/ttyUSB0 115200` |
+| Test serial | `screen /dev/ttyUSB0 921600` |
 | Install Arduino IDE | `pip install arduino` |
 | Upload firmware | Arduino IDE: Sketch → Upload (`Ctrl+U`) |
-| Monitor serial | `screen /dev/ttyUSB0 115200` or Serial Monitor (`Ctrl+Shift+M`) |
-| Run RPi reader | `cd rpi && python3 main.py` |
+| Monitor serial | `screen /dev/ttyUSB0 921600` or Serial Monitor (`Ctrl+Shift+M`) |
 | Check udev rule | `udevadm test /dev/ttyUSB0` |
 | View RPi logs | `journalctl -u water-meter -f` |
 
@@ -593,10 +642,10 @@ python3 main.py
 
 - [Arduino IDE PyPI](https://pypi.org/project/arduino/)
 - [ESP32 Arduino Core Installation](https://docs.espressif.com/projects/arduino-esp32/en/latest/installing.html)
-- [Firebase-ESP-Client Docs](https://github.com/mobizt/Firebase-ESP-Client)
+- [ArduinoJson v7 Docs](https://arduinojson.org/v7/)
 - [pyserial Docs](https://pyserial.readthedocs.io/)
 - [pyserial VID/PID Detection](https://pyserial.readthedocs.io/en/latest/tools.html#module-serial.tools.list_ports)
 
 ---
 
-*Last updated: July 2026 | `pip install arduino` on Raspberry Pi OS Bookworm/Trixie (64-bit) | Compatible with ESP32 ESP32 Dev Module, ESP32-S3, ESP32-C3*
+*Last updated: July 2026 | `pip install arduino` on Raspberry Pi OS Trixie (64-bit) | Compatible with ESP32 Dev Module, ESP32-S3, ESP32-C3*

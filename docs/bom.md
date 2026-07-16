@@ -1,6 +1,6 @@
 # Bill of Materials (BOM) — Water Meter with Leak Detection
 
-> **System:** 1 inlet flow sensor + 3 fixture flow sensors → ESP32 → Firebase → RPi → XGBoost ML  
+> **System:** 1 inlet flow sensor + 3 fixture flow sensors → ESP32 → USB Serial → RPi → XGBoost ML  
 > **Supplier Priority:** [Makerlab Electronics](https://shopee.ph/makerlabelectronics) → 4–5 alternatives  
 > **Prices:** Estimated in Philippine Peso (₱), July 2026
 

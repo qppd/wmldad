@@ -2,9 +2,9 @@
 
 ## Overview
 
-Smart water monitoring system with **fixture-level leak detection** using **ESP32 → Firebase → RPi → XGBoost ML**.
+Smart water monitoring system with **fixture-level leak detection** using **ESP32 → USB Serial → RPi → XGBoost ML**.
 
-The system uses 1 inlet flow sensor to measure total consumption and 3 fixture flow sensors to monitor individual water outlets (bidet, kitchen, bathroom shower). Data flows from the ESP32 to Firebase Realtime DB via the [Firebase-ESP-Client](https://github.com/mobizt/Firebase-ESP-Client) library (stream + regular calls). A **Raspberry Pi** backend consumes the Firebase data using **Pyrebase4**, runs **XGBoost** and **Isolation Forest** ML models, and serves a web dashboard on the 7" touchscreen LCD.
+The system uses 1 inlet flow sensor to measure total consumption and 3 fixture flow sensors to monitor individual water outlets (bidet, kitchen, bathroom shower). Data flows from the ESP32 to Raspberry Pi via **USB Serial (CDC/ACM)** at 921600 baud. A **Raspberry Pi** backend consumes the serial data using **pyserial**, runs **XGBoost** and **Isolation Forest** ML models, and serves a web dashboard on the 7" touchscreen LCD.
 
 ---
 
@@ -32,46 +32,46 @@ graph TB
     subgraph "ESP32 Edge Layer"
         direction TB
         Sensors["4× Flow Sensor<br/>Pulse Counters<br/>(ISR + Debounce)"]
-        Features["Feature Extractor<br/>flow_rate, volume,<br/>duration, time, ratio"]
-        FirebaseClient["Firebase-ESP-Client<br/>Stream + Write"]
-        LocalCtrl["Local Leak Rules"]
-        SPIFFS["SPIFFS Logger<br/>(Offline Backup)"]
+        SerialOut["USB Serial Output<br/>JSON Lines<br/>(921600 baud)"]
+        LocalCtrl["Local Leak Rules<br/>(Threshold-based)"]
+        SPIFFS["SPIFFS Logger<br/>(Offline Buffer)"]
         
-        Sensors --> Features
-        Features --> FirebaseClient
-        Features --> LocalCtrl
+        Sensors --> SerialOut
+        Sensors --> LocalCtrl
         Sensors --> SPIFFS
+        LocalCtrl --> SerialOut
     end
 
-    subgraph "Firebase Realtime DB"
-        direction TB
-        Readings["/readings/{device_id}/{ts}<br/>Raw sensor data"]
-        Alerts["/alerts/{alert_id}<br/>Leak events"]
-        Commands["/commands/{device_id}<br/>Device commands"]
-        Models["/models/{version}<br/>ML metadata"]
+    subgraph "USB Connection"
+        USB[USB Cable<br/>CDC/ACM Device<br/>(/dev/ttyUSB0)]
     end
 
     subgraph "RPi Backend"
         direction TB
-        FBAdmin["Pyrebase4<br/>(Poll + Write)"]
+        SerialReader["Serial Reader<br/>(pyserial / asyncio)"]
+        Parser["JSON Parser<br/>Validate + Normalize"]
         XGB["XGBoost Classifier<br/>normal / minor_leak / major_leak"]
         ISO["Isolation Forest<br/>Unsupervised Anomaly Detection"]
         Flask["Flask Web App<br/>Dashboard + API"]
         AlertEngine["Alert Engine<br/>In-App + Webhook"]
         Retrain["Daily Retrain Pipeline"]
+        DB["SQLite / InfluxDB<br/>Time-series Storage"]
         
-        FBAdmin --> XGB
-        FBAdmin --> ISO
+        SerialReader --> Parser
+        Parser --> XGB
+        Parser --> ISO
+        Parser --> DB
         XGB --> Flask
         ISO --> Flask
         Flask --> AlertEngine
         Flask --> Retrain
+        DB --> Flask
     end
 
     subgraph "User Layer"
         Dashboard["Web Dashboard<br/>Real-time Charts"]
         Notif["In-App + Webhook<br/>Alerts"]
-        Cmd["Remote Device<br/>Control"]
+        Cmd["Remote Device<br/>Control (via Serial)"]
     end
 
     B --> Sensors
@@ -79,18 +79,13 @@ graph TB
     E2 --> Sensors
     E3 --> Sensors
     
-    FirebaseClient --> Readings
-    FirebaseClient --> Alerts
-    Commands --> FirebaseClient
-    
-    Readings --> FBAdmin
-    Alerts --> FBAdmin
-    Commands --> FBAdmin
+    SerialOut --> USB
+    USB --> SerialReader
     
     Flask --> Dashboard
     AlertEngine --> Notif
     Dashboard --> Cmd
-    Cmd --> Commands
+    Cmd --> SerialReader
 ```
 
 </details>
@@ -116,23 +111,27 @@ Step 2: LOCAL PROCESSING
         → volume = pulse_count / PPL
         → total_liters += volume
         → Inlet balance = inlet_volume - sum(fixtures_volume)
+        → Local leak rules (hidden leak, continuous flow, drip)
 
-Step 3: FIREBASE UPLOAD (every 5–60 seconds via Firebase-ESP-Client)
-        → Write to /readings/{device_id}/{timestamp}
-        → Stream listener for /commands/{device_id}
+Step 3: USB SERIAL OUTPUT (every 5 sec)
+        → Build JSON payload with all 4 sensors
+        → Write JSON line to Serial (921600 baud)
+        → Format: {"device_id":"wmldad-001","ts":1703123456789,"sensor":1,"gpio":26,"pulses":127,"flow_rate_lpm":2.34,"volume_ml":456}
 
-Step 4: RPi PROCESSING (polling via Pyrebase4)
-        → Poll /readings/{device_id} for new data
-        → Extract features for ML
+Step 4: RPi PROCESSING (pyserial + asyncio)
+        → Auto-detect ESP32 on /dev/ttyUSB0 or /dev/ttyUSB1
+        → Read JSON lines continuously
+        → Parse and validate JSON
+        → Extract features for ML (9 features per fixture)
         → Run XGBoost inference
         → Run Isolation Forest anomaly score
-        → If leak detected → write to /alerts/ + trigger notification
+        → Store in SQLite/InfluxDB
+        → If leak detected → write alert + trigger notification
 
 Step 5: USER ACTION
-        → Dashboard displays real-time readings
-        → In-app alert displayed on 7" touchscreen + webhook
-        → User sends command → /commands/{device_id}
-        → ESP32 Firebase listener receives command → executes action
+        → Dashboard displays real-time readings on 7" touchscreen
+        → In-app alert displayed on touchscreen + webhook
+        → User sends command via dashboard → Serial to ESP32
 ```
 
 ---
@@ -141,12 +140,11 @@ Step 5: USER ACTION
 
 | Path | Method | Protocol | Library |
 |------|--------|----------|---------|
-| ESP32 → Firebase | Write + Stream | HTTPS/SSE | Firebase-ESP-Client |
-| Firebase → ESP32 | Stream Listener | Server-Sent Events | Firebase-ESP-Client |
-| RPi → Firebase | Read + Write | REST (Pyrebase4) | Pyrebase4 |
-| Firebase → RPi | Poll (HTTP) | REST | Pyrebase4 |
+| Sensor → ESP32 | Pulse (GPIO interrupt) | Rising edge | Arduino ISR |
+| ESP32 → RPi | USB UART | JSON Lines (921600 baud) | Arduino Serial / pyserial |
+| RPi → ESP32 | USB UART | JSON Commands | pyserial / Arduino Serial |
 | User → Dashboard | HTTP/WebSocket | HTTPS | Flask + JavaScript |
-| Dashboard → Commands | Write to /commands | HTTPS | Fetch API |
+| Dashboard → Commands | Write to Serial | JSON | pyserial |
 | **Remote → RPi** | **HTTPS (port forward)** | **HTML/JSON** | **On demand** |
 
 ---
@@ -155,14 +153,14 @@ Step 5: USER ACTION
 
 | Decision | Rationale |
 |----------|-----------|
-| **Firebase over custom server** | Managed real-time DB, built-in auth, no server maintenance |
-| **Firebase-ESP-Client** | Most mature Firebase library for ESP32, supports streaming (SSE) |
-| **Pyrebase4** | Email/Password auth, client-style API, works on RPi |
+| **USB Serial over Firebase** | No internet dependency for core loop; zero monthly cost; lower latency; works offline |
+| **pyserial + asyncio** | Non-blocking reads, handles reconnection, standard Python |
 | **RPi over cloud hosting** | Local processing — no monthly fees, full control, no internet dependency for LAN dashboard |
 | **Isolation Forest + XGBoost** | XGBoost for known leak patterns, Isolation Forest for unknown anomalies |
 | **Check Valves per Fixture** | Prevents backflow contamination between fixtures |
-| **SPIFFS Backup** | Survives WiFi/Firebase outages — data never lost |
+| **SPIFFS Backup** | Survives USB disconnects / RPi reboots — data never lost |
 | **Port Forwarding + DDNS** | Remote access anywhere with internet; standard router feature |
+| **921600 baud** | High throughput for 4 sensors × 5 sec interval; reliable on CP2102/CH340 |
 
 ---
 
@@ -198,6 +196,8 @@ LM2596S Buck Converter (12V → 5V)
     │
     ▼
 Flow Sensors VCC (5V)
+
+USB from RPi → ESP32 USB (Data + 5V Backup)
 ```
 
 > All sensors connect directly to GPIO (26, 25, 33, 32) — no pull-up resistors or capacitors needed (YF-S201 outputs digital pulses).

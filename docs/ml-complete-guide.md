@@ -3,7 +3,7 @@
 > **Target:** Beginners building XGBoost + Isolation Forest models for water leak detection  
 > **Pipeline:** Data Collection → Labeling → Feature Engineering → Training → Hyperparameter Tuning → Evaluation → Export → RPi Deployment → Inference  
 > **Output:** Models deployed to Raspberry Pi for real-time inference via Flask API  
-> **Prerequisites:** Python 3.10+, basic ML knowledge, Firebase project, ESP32 sending data
+> **Prerequisites:** Python 3.10+, basic ML knowledge, ESP32 sending data via USB Serial
 
 ---
 
@@ -71,6 +71,7 @@
 ## Data Collection Strategy
 
 ### Phase 1: Synthetic Data Generation (Week 1-2)
+
 **Purpose:** Bootstrap model before real hardware deployed
 
 ```python
@@ -142,20 +143,47 @@ print(f"Generated {len(df)} synthetic samples")
 | Hidden | Inlet open, all fixtures closed | 5-10 min | Weekly |
 | Stuck valve | Fixture open continuously | 30+ min | Weekly |
 
-**Data Logging on RPi:**
+**Data Logging on RPi (via USB Serial):**
 
 ```python
-# rpi/data_logger.py (add to firebase_listener.py)
+# rpi/data_logger.py
 import json
 from datetime import datetime
+import sqlite3
 
-def save_daily_backup(db, device_id):
-    readings = db.child(f"readings/{device_id}").get()
-    filename = f"data/raw/readings_{datetime.now().strftime('%Y%m%d')}.json"
-    with open(filename, 'w') as f:
-        json.dump(readings.val(), f)
+def init_db():
+    conn = sqlite3.connect('data/readings.db')
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS readings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp REAL,
+            device_id TEXT,
+            sensor INTEGER,
+            gpio INTEGER,
+            pulses INTEGER,
+            flow_rate_lpm REAL,
+            volume_ml REAL
+        )
+    ''')
+    conn.execute('CREATE INDEX IF NOT EXISTS idx_timestamp ON readings(timestamp)')
+    conn.commit()
+    return conn
 
-# Run daily via cron: 0 2 * * * /home/pi/wmldad/rpi/venv/bin/python -c "from data_logger import save_daily_backup; save_daily_backup(db, 'wm_001')"
+def log_reading(conn, reading):
+    conn.execute('''
+        INSERT INTO readings (timestamp, device_id, sensor, gpio, pulses, flow_rate_lpm, volume_ml)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (reading.timestamp, reading.device_id, reading.sensor, reading.gpio,
+          reading.pulses, reading.flow_rate_lpm, reading.volume_ml))
+    conn.commit()
+
+# Run daily via cron: 0 2 * * * /home/pi/wmldad/rpi/venv/bin/python -c "from data_logger import export_daily; export_daily()"
+def export_daily():
+    conn = sqlite3.connect('data/readings.db')
+    df = pd.read_sql("SELECT * FROM readings WHERE date(timestamp, 'unixepoch') = date('now', '-1 day')", conn)
+    filename = f"data/raw/readings_{datetime.now().strftime('%Y%m%d')}.csv"
+    df.to_csv(filename, index=False)
+    print(f"Exported {len(df)} readings to {filename}")
 ```
 
 ---
@@ -176,14 +204,14 @@ def save_daily_backup(db, device_id):
 ```csv
 # data/annotations/leak_events.csv
 timestamp,device_id,fixture_index,label,confidence,annotator,notes
-2026-07-10T08:15:00Z,wm_001,1,minor_leak,0.95,student1,"Simulated drip leak - bidet valve partially open"
-2026-07-10T14:30:00Z,wm_001,2,major_leak,0.99,student1,"Simulated burst - kitchen faucet fully open"
-2026-07-12T03:00:00Z,wm_001,0,minor_leak,0.90,student1,"Hidden leak - inlet flow, all fixtures closed"
+2026-07-10T08:15:00Z,wmldad-001,1,minor_leak,0.95,student1,"Simulated drip leak - bidet valve partially open"
+2026-07-10T14:30:00Z,wmldad-001,2,major_leak,0.99,student1,"Simulated burst - kitchen faucet fully open"
+2026-07-12T03:00:00Z,wmldad-001,0,minor_leak,0.90,student1,"Hidden leak - inlet flow, all fixtures closed"
 ```
 
 ### Labeling Workflow
 
-1. **Export raw data** from Firebase to CSV/Parquet
+1. **Export raw data** from RPi SQLite to CSV/Parquet
 2. **Run Isolation Forest** on normal data to find anomalies
 3. **Review anomalies** manually — label as leak types
 4. **Add confirmed labels** to annotation CSV
@@ -201,26 +229,13 @@ import numpy as np
 
 # Load synthetic + real data
 synthetic = pd.read_csv('data/raw/training_data_synthetic.csv')
-real_files = ['data/raw/readings_20260710.json', 'data/raw/readings_20260711.json', ...]
+real_files = ['data/raw/readings_20260710.csv', 'data/raw/readings_20260711.csv']
 
-# Convert Firebase JSON to DataFrame (real data)
-def firebase_to_dataframe(json_files):
-    all_data = []
-    for f in json_files:
-        with open(f) as fp:
-            data = json.load(fp)
-        for ts, reading in data.items():
-            row = {'timestamp': ts}
-            # Flatten inlet
-            for k, v in reading.get('inlet', {}).items():
-                row[f'inlet_{k}'] = v
-            # Flatten fixtures
-            for i in [1,2,3]:
-                fixture = reading.get(f'fixture_{i}', {})
-                for k, v in fixture.items():
-                    row[f'fixture_{i}_{k}'] = v
-            all_data.append(row)
-    return pd.DataFrame(all_data)
+def sqlite_to_dataframe(db_path):
+    conn = sqlite3.connect(db_path)
+    df = pd.read_sql("SELECT * FROM readings", conn)
+    conn.close()
+    return df
 ```
 
 ### 2. Cleaning Pipeline
@@ -233,20 +248,18 @@ def clean_data(df):
     df = df.drop_duplicates(subset=['timestamp', 'device_id'])
     
     # 2. Handle missing values
-    df = df.dropna(subset=['inlet_flow_rate', 'fixture_1_flow_rate', 
-                           'fixture_2_flow_rate', 'fixture_3_flow_rate'])
+    required_cols = ['flow_rate_lpm', 'sensor']
+    df = df.dropna(subset=required_cols)
     
     # 3. Remove impossible values
-    df = df[(df['inlet_flow_rate'] >= 0) & (df['inlet_flow_rate'] < 100)]
-    for i in [1,2,3]:
-        df = df[(df[f'fixture_{i}_flow_rate'] >= 0) & (df[f'fixture_{i}_flow_rate'] < 50)]
+    df = df[(df['flow_rate_lpm'] >= 0) & (df['flow_rate_lpm'] < 100)]
     
     # 4. Convert timestamp
-    df['timestamp'] = pd.to_datetime(df['timestamp'])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
     df = df.sort_values('timestamp').reset_index(drop=True)
     
     # 5. Remove outliers (IQR method per feature)
-    for col in ['inlet_flow_rate', 'fixture_1_flow_rate', 'fixture_2_flow_rate', 'fixture_3_flow_rate']:
+    for col in ['flow_rate_lpm']:
         Q1 = df[col].quantile(0.25)
         Q3 = df[col].quantile(0.75)
         IQR = Q3 - Q1
@@ -281,7 +294,7 @@ pulse_buffer = {i: deque(maxlen=5) for i in range(5)}
 flow_start_time = {i: None for i in range(5)}
 
 def extract_features(data, sensor_id, fixture_count=5):
-    """Extract 9 features from Firebase reading data."""
+    """Extract 9 features from sensor reading data."""
     
     inlet = data.get('inlet', {})
     fixture = data.get(f'fixture_{sensor_id}', {})
@@ -382,7 +395,6 @@ jupyter notebook training/water_meter_ml_training.ipynb
 ### Option C: RPi Native Training (Slow — No GPU)
 
 ```bash
-# Only for small datasets or retraining
 cd ~/wmldad/training
 source ../rpi/venv/bin/activate
 pip install -r requirements.txt
@@ -498,245 +510,148 @@ model.fit(
 )
 
 print(f"Best iteration: {model.best_iteration}")
-print(f"Best score: {model.best_score}")
-```
-
-### Save Model
-
-```python
-# Native JSON format (best for deployment)
-model.save_model('models/xgboost_model.json')
-
-# Also save sklearn-compatible version
-joblib.dump(model, 'models/xgboost_model.pkl')
 ```
 
 ---
 
 ## Hyperparameter Tuning
 
-### Optuna Optimization (Recommended)
+### Using Optuna
 
 ```python
-# training/tune_xgboost.py
 import optuna
-import xgboost as xgb
 
 def objective(trial):
     params = {
         'objective': 'multi:softprob',
         'num_class': 3,
-        'eval_metric': 'mlogloss',
-        
-        'max_depth': trial.suggest_int('max_depth', 4, 10),
-        'min_child_weight': trial.suggest_int('min_child_weight', 1, 10),
-        'gamma': trial.suggest_float('gamma', 0, 1.0),
+        'eval_metric': ['mlogloss', 'merror'],
+        'max_depth': trial.suggest_int('max_depth', 4, 8),
+        'min_child_weight': trial.suggest_int('min_child_weight', 3, 10),
+        'gamma': trial.suggest_float('gamma', 0, 0.5),
         'subsample': trial.suggest_float('subsample', 0.6, 1.0),
         'colsample_bytree': trial.suggest_float('colsample_bytree', 0.6, 1.0),
-        'reg_alpha': trial.suggest_float('reg_alpha', 0, 2.0),
-        'reg_lambda': trial.suggest_float('reg_lambda', 0, 2.0),
-        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.2),
+        'reg_alpha': trial.suggest_float('reg_alpha', 0, 1),
+        'reg_lambda': trial.suggest_float('reg_lambda', 0.5, 2),
+        'learning_rate': trial.suggest_float('learning_rate', 0.05, 0.2),
         'n_estimators': 500,
         'early_stopping_rounds': 30,
         'n_jobs': -1,
         'random_state': 42,
-        'verbosity': 0,
-        'tree_method': 'gpu_hist',  # 'hist' for CPU
+        'tree_method': 'hist',
     }
     
     model = xgb.XGBClassifier(**params)
     model.fit(
         X_train_scaled, y_train,
+        sample_weight=sample_weights,
         eval_set=[(X_val_scaled, y_val)],
         verbose=False
     )
     
-    return model.best_score
+    # Return validation error
+    preds = model.predict(X_val_scaled)
+    return 1 - accuracy_score(y_val, preds)
 
-# Run optimization
 study = optuna.create_study(direction='minimize')
-study.optimize(objective, n_trials=100, timeout=3600)
+study.optimize(objective, n_trials=50)
 
 print(f"Best params: {study.best_params}")
 print(f"Best score: {study.best_value}")
-
-# Save best params
-import json
-with open('models/best_xgb_params.json', 'w') as f:
-    json.dump(study.best_params, f)
-```
-
-### Apply Best Params
-
-```python
-with open('models/best_xgb_params.json') as f:
-    best_params = json.load(f)
-
-best_params.update({
-    'objective': 'multi:softprob',
-    'num_class': 3,
-    'eval_metric': ['mlogloss', 'merror'],
-    'n_estimators': 1000,
-    'early_stopping_rounds': 50,
-    'n_jobs': -1,
-    'random_state': 42,
-    'verbosity': 1,
-    'tree_method': 'hist'
-})
-
-model = xgb.XGBClassifier(**best_params)
-model.fit(X_train_scaled, y_train, sample_weight=sample_weights, eval_set=eval_set, verbose=50)
-model.save_model('models/xgboost_model_tuned.json')
 ```
 
 ---
 
 ## Isolation Forest Training
 
-### Purpose
-Detect **unknown anomalies** — patterns not seen in training (new leak types, sensor faults, novel usage).
-
-### Train on Normal Data Only
-
 ```python
 from sklearn.ensemble import IsolationForest
-import joblib
 
-def train_isolation_forest(normal_data_path='data/processed/normal_only.csv'):
-    """Train Isolation Forest on normal usage data only."""
-    
-    df = pd.read_csv(normal_data_path)
-    X_normal = df.drop('label', axis=1).values
-    
-    model = IsolationForest(
-        n_estimators=200,
-        contamination=0.05,        # Expect 5% anomalies
-        max_samples='auto',
-        max_features=1.0,
-        bootstrap=False,
-        n_jobs=-1,
-        random_state=42,
-        verbose=1
-    )
-    model.fit(X_normal)
-    
-    joblib.dump(model, 'models/isolation_forest.pkl')
-    print(f"Isolation Forest trained on {len(X_normal)} normal samples")
-    return model
-```
+# Train on NORMAL data only (label == 0)
+X_normal = X_train_scaled[y_train == 0]
 
-### Threshold Calibration
+iso_forest = IsolationForest(
+    n_estimators=200,
+    contamination=0.01,        # Expect ~1% anomalies
+    max_samples='auto',
+    max_features=1.0,
+    bootstrap=False,
+    n_jobs=-1,
+    random_state=42,
+    verbose=1
+)
 
-```python
-# Get anomaly scores on validation set
-val_scores = iso_forest.score_samples(X_val_scaled)  # Negative = more anomalous
-val_preds = iso_forest.predict(X_val_scaled)  # 1 = normal, -1 = anomaly
+iso_forest.fit(X_normal)
 
-# Analyze score distribution by true class
-for cls in [0, 1, 2]:
-    mask = y_val == cls
-    scores = val_scores[mask]
-    print(f"Class {cls}: mean={scores.mean():.4f}, std={scores.std():.4f}, "
-          f"min={scores.min():.4f}, max={scores.max():.4f}")
-
-# Choose threshold (e.g., 5th percentile of normal scores)
-threshold = np.percentile(val_scores[y_val == 0], 5)
-print(f"Anomaly threshold (5th pctile of normal): {threshold:.4f}")
+# Determine threshold from validation normal data
+X_val_normal = X_val_scaled[y_val == 0]
+normal_scores = iso_forest.score_samples(X_val_normal)
+threshold = np.percentile(normal_scores, 1)  # 1st percentile
 
 # Save threshold
 joblib.dump(threshold, 'models/iso_threshold.pkl')
+joblib.dump(iso_forest, 'models/isolation_forest.pkl')
+
+print(f"Isolation Forest threshold: {threshold:.4f}")
 ```
 
 ---
 
 ## Model Evaluation
 
-### XGBoost Evaluation
-
 ```python
-from sklearn.metrics import (classification_report, confusion_matrix, 
-                             accuracy_score, f1_score, precision_recall_fscore_support)
+from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+import seaborn as sns
+import matplotlib.pyplot as plt
 
-# Predictions
+# XGBoost predictions
 y_pred = model.predict(X_test_scaled)
 y_proba = model.predict_proba(X_test_scaled)
 
-# Overall metrics
-print(f"Accuracy: {accuracy_score(y_test, y_pred):.4f}")
-print(f"F1 Macro: {f1_score(y_test, y_pred, average='macro'):.4f}")
-print(f"F1 Weighted: {f1_score(y_test, y_pred, average='weighted'):.4f}")
+print("XGBoost Classification Report:")
+print(classification_report(y_test, y_pred, target_names=['normal', 'minor_leak', 'major_leak']))
 
-# Per-class report
-target_names = ['normal', 'minor_leak', 'major_leak']
-print(classification_report(y_test, y_pred, target_names=target_names))
-
-# Confusion matrix
+# Confusion Matrix
 cm = confusion_matrix(y_test, y_pred)
 plt.figure(figsize=(8, 6))
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
-            xticklabels=target_names, yticklabels=target_names)
-plt.xlabel('Predicted')
-plt.ylabel('Actual')
-plt.title('Confusion Matrix')
-plt.show()
+            xticklabels=['normal', 'minor_leak', 'major_leak'],
+            yticklabels=['normal', 'minor_leak', 'major_leak'])
+plt.title('XGBoost Confusion Matrix')
+plt.savefig('models/confusion_matrix.png')
 
-# Per-class confidence analysis
-for i, name in enumerate(target_names):
-    class_mask = y_test == i
-    if class_mask.any():
-        avg_conf = y_proba[class_mask, i].mean()
-        print(f"{name}: avg confidence = {avg_conf:.4f}")
-```
+# Isolation Forest on test set
+iso_scores = iso_forest.score_samples(X_test_scaled)
+iso_anomalies = iso_scores < threshold
 
-### Combined Evaluation (XGBoost + Isolation Forest)
+print(f"\nIsolation Forest:")
+print(f"  Anomalies detected: {iso_anomalies.sum()} / {len(iso_anomalies)}")
+print(f"  Threshold: {threshold:.4f}")
 
-```python
-def combined_predict(X, xgb_model, iso_model, threshold, confidence_thresh=0.80):
-    """Combine XGBoost + Isolation Forest predictions."""
-    
-    # XGBoost predictions
+# Combined evaluation
+def combined_predict(xgb_model, iso_model, iso_threshold, X, conf_threshold=0.80):
     xgb_proba = xgb_model.predict_proba(X)
     xgb_pred = np.argmax(xgb_proba, axis=1)
     xgb_conf = np.max(xgb_proba, axis=1)
     
-    # Isolation Forest
-    iso_scores = iso_model.score_samples(X)
-    iso_anomaly = iso_scores < threshold
+    iso_score = iso_model.score_samples(X)
+    iso_anomaly = iso_score < iso_threshold
     
-    # Decision logic
-    final_pred = []
+    final = []
     for i in range(len(X)):
-        if xgb_conf[i] >= confidence_thresh:
-            final_pred.append(xgb_pred[i])  # Trust XGBoost
+        if xgb_conf[i] >= conf_threshold:
+            final.append(xgb_pred[i])
         elif iso_anomaly[i]:
-            final_pred.append(3)  # anomaly
+            final.append(3)  # anomaly class
         else:
-            final_pred.append(4)  # uncertain
-    
-    return np.array(final_pred), xgb_conf, iso_scores
+            final.append(0)  # uncertain → normal
+    return np.array(final)
 
-# Evaluate combined
-final_pred, xgb_conf, iso_scores = combined_predict(
-    X_test_scaled, model, iso_forest, threshold
-)
-
-# Custom evaluation
-from sklearn.metrics import classification_report
-target_names = ['normal', 'minor_leak', 'major_leak', 'anomaly', 'uncertain']
-print(classification_report(y_test, final_pred, target_names=target_names, zero_division=0))
+y_combined = combined_predict(model, iso_forest, threshold, X_test_scaled)
+print("\nCombined Model:")
+print(classification_report(y_test, y_combined, 
+    target_names=['normal', 'minor_leak', 'major_leak', 'anomaly']))
 ```
-
-### Performance Targets
-
-| Metric | XGBoost Target | Isolation Forest Target |
-|--------|----------------|------------------------|
-| **Accuracy** | ≥ 95% | N/A (unsupervised) |
-| **Precision (leak)** | ≥ 90% | ≥ 85% |
-| **Recall (leak)** | ≥ 95% | ≥ 90% |
-| **F1-Score** | ≥ 92% | ≥ 87% |
-| **False Positive Rate** | ≤ 2% | ≤ 5% |
-| **Inference Time** | ≤ 5ms | ≤ 5ms |
-| **Model Size** | ≤ 1 MB | ≤ 1 MB |
 
 ---
 
@@ -745,58 +660,40 @@ print(classification_report(y_test, final_pred, target_names=target_names, zero_
 ```python
 import shap
 
-# Create SHAP explainer
+# SHAP explainer
 explainer = shap.TreeExplainer(model)
-
-# SHAP values for test set (sample for speed)
-shap_values = explainer.shap_values(X_test_scaled[:500])
+shap_values = explainer.shap_values(X_test_scaled[:100])
 
 # Summary plot
-shap.summary_plot(shap_values, X_test_scaled[:500], 
-                  feature_names=feature_cols,
-                  class_names=target_names)
+shap.summary_plot(shap_values, X_test_scaled[:100], feature_names=feature_cols)
+plt.savefig('models/shap_summary.png')
 
 # Dependence plots for top features
-for i in range(3):
-    shap.dependence_plot(i, shap_values[i], X_test_scaled[:500], 
-                         feature_names=feature_cols)
+for feat in feature_cols[:3]:
+    shap.dependence_plot(feat, shap_values, X_test_scaled[:100], feature_names=feature_cols)
+    plt.savefig(f'models/shap_dependence_{feat}.png')
 ```
-
-### Expected SHAP Insights
-
-| Feature | Expected SHAP Behavior |
-|---------|------------------------|
-| `flow_rate` | High values → major_leak; very low → minor_leak |
-| `inlet_ratio` | > 1.2 → hidden leak (inlet > sum of fixtures) |
-| `duration` | Long + low flow → minor_leak; long + high flow → major_leak |
-| `is_night` | Night + flow → higher leak probability |
-| `rate_variance` | Very low (steady) → leak; high → normal usage |
 
 ---
 
 ## Model Export for Deployment
 
-### Required Artifacts
-
 ```python
-# In training notebook - final cells:
-
-# 1. XGBoost model (native JSON format)
+# Save XGBoost model
 model.save_model('models/xgboost_model.json')
 
-# 2. Isolation Forest (joblib)
-joblib.dump(iso_forest, 'models/isolation_forest.pkl')
+# Save all artifacts
+models_dir = Path('models')
+models_dir.mkdir(exist_ok=True)
 
-# 3. Scaler (joblib)
-joblib.dump(scaler, 'models/scaler.pkl')
+# Already saved during training:
+# - scaler.pkl
+# - feature_cols.pkl
+# - isolation_forest.pkl
+# - iso_threshold.pkl
+# - xgboost_model.json
 
-# 4. Isolation Forest threshold
-joblib.dump(threshold, 'models/iso_threshold.pkl')
-
-# 5. Feature column names (for consistency)
-joblib.dump(feature_cols, 'models/feature_cols.pkl')
-
-# 6. Metadata
+# Metadata
 metadata = {
     'version': '2.0',
     'created': pd.Timestamp.now().isoformat(),
@@ -812,14 +709,20 @@ metadata = {
         'major_leak_recall': 0.94
     }
 }
+
 import json
-with open('models/metadata.json', 'w') as f:
+with open(models_dir / 'metadata.json', 'w') as f:
     json.dump(metadata, f, indent=2)
+
+# Verify export package
+for f in ['xgboost_model.json', 'isolation_forest.pkl', 'scaler.pkl', 
+          'iso_threshold.pkl', 'feature_cols.pkl', 'metadata.json']:
+    print(f"{f}: {(models_dir / f).stat().st_size / 1024:.1f} KB")
 ```
 
-### Verify Export Package
+**Export Package (~700 KB total):**
 
-```bash
+```
 models/
 ├── xgboost_model.json        # ~500 KB
 ├── isolation_forest.pkl      # ~200 KB
@@ -827,7 +730,6 @@ models/
 ├── iso_threshold.pkl         # ~1 KB
 ├── feature_cols.pkl          # ~1 KB
 └── metadata.json             # ~2 KB
-Total: ~700 KB
 ```
 
 ---
@@ -870,7 +772,6 @@ pip install \
 # Install web dependencies
 pip install \
     flask==3.0.0 \
-    pyrebase4==4.5.0 \
     gunicorn==21.2.0 \
     python-dotenv==1.0.0 \
     requests==2.31.0
@@ -884,7 +785,7 @@ pip install \
 scp -r models/ pi@water-meter.local:~/wmldad/rpi/models/
 
 # Option 2: Download from Colab Files panel
-# Option 3: Git (if committed - not recommended for large models)
+# Option 3: Git (not recommended for large models)
 
 # Verify on RPi
 ls -la ~/wmldad/rpi/models/
@@ -929,6 +830,7 @@ class LeakDetector:
         self.model_loaded = False
         self.n_features = 9
         self.target_names = ['normal', 'minor_leak', 'major_leak']
+        self.inference_count = 0
         
         self._load_models()
     
@@ -964,15 +866,7 @@ class LeakDetector:
             raise
     
     def predict(self, features_raw: Union[np.ndarray, List]) -> Dict[str, Any]:
-        """
-        Run inference on raw features.
-        
-        Args:
-            features_raw: Array of shape (n_features,) or (1, n_features) or (n_samples, n_features)
-            
-        Returns:
-            Dict with keys: xgboost, isolation_forest, final, confidence
-        """
+        """Run inference on raw features."""
         if not self.model_loaded:
             raise RuntimeError("Models not loaded")
         
@@ -1031,17 +925,18 @@ class LeakDetector:
             
             results.append(result)
         
+        self.inference_count += 1
         return results[0] if len(results) == 1 else results
     
     def warm_up(self, n_warmup: int = 10):
-        """Run dummy inferences to warm up (JIT, cache)"""
+        """Run dummy inferences to warm up (JIT, cache)."""
         dummy = np.zeros((1, self.n_features), dtype=np.float32)
         for _ in range(n_warmup):
             _ = self.predict(dummy)
         logger.info(f"🔥 Warm-up complete ({n_warmup} iterations)")
     
     def benchmark(self, n_iterations: int = 100) -> Dict[str, float]:
-        """Benchmark inference speed"""
+        """Benchmark inference speed."""
         import time
         
         dummy = np.zeros((1, self.n_features), dtype=np.float32)
@@ -1061,6 +956,7 @@ class LeakDetector:
             'iterations': n_iterations,
             'throughput_fps': n_iterations / elapsed
         }
+
 
 def load_deployment_package(model_dir: str = 'models') -> Dict[str, Any]:
     """Load complete deployment package from directory."""
@@ -1092,310 +988,229 @@ def load_deployment_package(model_dir: str = 'models') -> Dict[str, Any]:
 
 ```python
 # rpi/api_endpoints.py
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, current_app
 import numpy as np
 import logging
-from ml_inference import get_detector, load_deployment_package
 
 logger = logging.getLogger(__name__)
-api = Blueprint('api', __name__)
 
-# Global detector instance
-_detector = None
+api = Blueprint('api', __name__, url_prefix='/api')
 
-def get_detector():
-    global _detector
-    if _detector is None:
-        _detector = load_deployment_package('models')['detector']
-    return _detector
 
-@api.route('/api/predict', methods=['POST'])
+@api.route('/predict', methods=['POST'])
 def predict():
-    """Single prediction endpoint"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'No JSON data'}), 400
-        
-        # Extract features from request
-        features = extract_features_from_request(data)
-        
-        # Run inference
-        detector = get_detector()
-        result = detector.predict(features)
-        
-        return jsonify(result)
+    """Single prediction endpoint."""
+    data = request.get_json()
+    if not data or 'features' not in data:
+        return jsonify({'error': 'Missing features field'}), 400
     
+    features = data['features']
+    if not isinstance(features, list) or len(features) != 9:
+        return jsonify({'error': 'Expected 9 features'}), 400
+    
+    try:
+        detector = current_app.detector
+        result = detector.predict(features)
+        return jsonify(result)
     except Exception as e:
         logger.error(f"Prediction error: {e}")
         return jsonify({'error': str(e)}), 500
 
-@api.route('/api/health')
-def health():
-    """Health check endpoint"""
-    detector = get_detector()
-    return jsonify({
-        'status': 'healthy',
-        'model_loaded': detector.model_loaded,
-        'n_features': detector.n_features
-    })
 
-@api.route('/api/benchmark')
-def benchmark():
-    """Run inference benchmark"""
-    detector = get_detector()
-    return jsonify(detector.benchmark(100))
+@api.route('/predict_batch', methods=['POST'])
+def predict_batch():
+    """Batch prediction endpoint."""
+    data = request.get_json()
+    if not data or 'features_batch' not in data:
+        return jsonify({'error': 'Missing features_batch field'}), 400
+    
+    batch = data['features_batch']
+    if not isinstance(batch, list):
+        return jsonify({'error': 'features_batch must be a list'}), 400
+    
+    try:
+        detector = current_app.detector
+        results = detector.predict(batch)
+        return jsonify({'predictions': results})
+    except Exception as e:
+        logger.error(f"Batch prediction error: {e}")
+        return jsonify({'error': str(e)}), 500
 
-def extract_features_from_request(data: dict) -> np.ndarray:
-    """Extract 9 features from Firebase reading or raw data."""
-    # If already features array
-    if 'features' in data:
-        return np.array(data['features'], dtype=np.float32)
-    
-    # If raw Firebase reading
-    inlet = data.get('inlet', {})
-    fixture = data.get('fixture', {})  # Single fixture
-    
-    # This should match training/features.py logic
-    # Simplified for API — full extraction happens in firebase_listener
-    return np.array([[
-        fixture.get('flow_rate', 0),
-        fixture.get('duration', 0),
-        data.get('hour', 12),
-        data.get('day', 0),
-        data.get('fixture_id', 1),
-        inlet.get('flow_rate', 0) / max(fixture.get('flow_rate', 0.01), 0.01),
-        0,  # rate_variance
-        1 if data.get('hour', 12) >= 22 or data.get('hour', 12) < 5 else 0,
-        0   # pulse_trend
-    ]], dtype=np.float32)
+
+@api.route('/models/info')
+def model_info():
+    """Get ML model metadata."""
+    if hasattr(current_app, 'ml_metadata'):
+        return jsonify(current_app.ml_metadata)
+    return jsonify({'error': 'No metadata available'}), 503
+
+
+@api.route('/models/benchmark')
+def benchmark_model():
+    """Run ML inference benchmark."""
+    if current_app.detector:
+        result = current_app.detector.benchmark(100)
+        return jsonify(result)
+    return jsonify({'error': 'Detector not loaded'}), 503
 ```
 
 ---
 
 ## Performance Optimization
 
-### 1. XGBoost Optimization for RPi
+### 1. Model Size Reduction
 
 ```python
-# In training: Use optimal parameters for edge deployment
-params = {
-    'n_estimators': 200,        # Reduced from 500
-    'max_depth': 6,             # Reduced from 8
-    'learning_rate': 0.1,       # Increased from 0.05
-    'subsample': 0.8,
-    'colsample_bytree': 0.8,
-    'reg_alpha': 0.1,
-    'reg_lambda': 1.0,
-    'objective': 'multi:softprob',
-    'num_class': 3,
-    'eval_metric': 'mlogloss',
-    'n_jobs': 1,                # Single thread on RPi
-    'random_state': 42,
-    'tree_method': 'hist',      # CPU optimized
+# Reduce XGBoost trees for faster inference
+params_optimized = {
+    **params,
+    'n_estimators': 100,      # Reduce from 300
+    'max_depth': 4,           # Reduce from 6
+    'learning_rate': 0.2,     # Increase to compensate
 }
 ```
 
-### 2. Benchmark Results (RPi 4 / 8GB)
-
-| Configuration | Inference Time | Memory | Accuracy |
-|---------------|----------------|--------|----------|
-| XGBoost (200 trees, depth 6) | 1.8 ms | 45 MB | 95.8% |
-| XGBoost (500 trees, depth 8) | 4.2 ms | 78 MB | 96.2% |
-| + Isolation Forest (100 est) | +0.5 ms | +12 MB | - |
-| **Total (optimized)** | **2.3 ms** | **57 MB** | **95.8%** |
-| **Total (full)** | **4.7 ms** | **90 MB** | **96.2%** |
-
-### 3. Memory Management
+### 2. Quantization (Post-training)
 
 ```python
-# In ml_inference.py - periodic garbage collection
-import gc
-import psutil
+# Convert to ONNX for potential speedup
+import onnxmltools
+from onnxmltools.convert import convert_xgboost
 
-class LeakDetector:
-    def __init__(self, ...):
-        # ... existing init ...
-        self.inference_count = 0
-    
-    def predict(self, features_raw):
-        # ... existing predict ...
-        self.inference_count += 1
-        
-        # Periodic GC
-        if self.inference_count % 1000 == 0:
-            gc.collect()
-            mem = psutil.Process().memory_info().rss / 1024 / 1024
-            logger.debug(f"Inference #{self.inference_count}, Memory: {mem:.1f} MB")
-        
-        return result
+onnx_model = convert_xgboost(model, target_opset=12)
+onnxmltools.utils.save_model(onnx_model, 'models/xgboost_model.onnx')
+
+# Use onnxruntime on RPi (may be faster)
+import onnxruntime as ort
+session = ort.InferenceSession('models/xgboost_model.onnx')
+```
+
+### 3. Feature Selection
+
+```python
+# Remove low-importance features
+importances = model.feature_importances_
+feature_importance = pd.DataFrame({
+    'feature': feature_cols,
+    'importance': importances
+}).sort_values('importance', ascending=False)
+
+print(feature_importance)
+# Keep top 7 features if needed
 ```
 
 ---
 
 ## Monitoring & Retraining
 
-### 1. Daily Retraining Pipeline (Cron)
+### Daily Retraining Pipeline
 
 ```bash
-# crontab -e
-# 0 3 * * * /home/pi/wmldad/rpi/venv/bin/python /home/pi/wmldad/rpi/retrain.py >> /home/pi/retrain.log 2>&1
+# /home/pi/wmldad/rpi/retrain_daily.sh
+#!/bin/bash
+cd /home/pi/wmldad
+
+# Activate venv
+source rpi/venv/bin/activate
+
+# Export new data
+python -c "from data_logger import export_daily; export_daily()"
+
+# Check if enough new data
+NEW_SAMPLES=$(python -c "
+import sqlite3
+conn = sqlite3.connect('data/readings.db')
+c = conn.cursor()
+c.execute(\"SELECT COUNT(*) FROM readings WHERE timestamp > strftime('%s', 'now', '-1 day')\")
+print(c.fetchone()[0])
+")
+
+if [ $NEW_SAMPLES -gt 1000 ]; then
+    echo "Retraining with $NEW_SAMPLES new samples..."
+    # Trigger retraining (run in background)
+    python training/retrain.py &
+else
+    echo "Not enough new data ($NEW_SAMPLES samples), skipping retrain"
+fi
 ```
+
+### Cron Job
+
+```bash
+# Add to crontab: crontab -e
+# Run daily at 3 AM
+0 3 * * * /home/pi/wmldad/rpi/retrain_daily.sh >> /home/pi/wmldad/logs/retrain.log 2>&1
+```
+
+### Model Versioning
 
 ```python
-# rpi/retrain.py
-import pandas as pd
-from firebase_listener import FirebaseListener
-from ml_inference import LeakDetector
-import joblib
+# training/retrain.py
+import os
+import shutil
+from datetime import datetime
 
-def daily_retrain():
-    # 1. Query new labeled data from Firebase
-    # (Requires user feedback via dashboard "confirm leak" button)
+def version_model():
+    """Archive current model, promote new one."""
+    models_dir = Path('models')
+    archive_dir = Path('models/archive')
+    archive_dir.mkdir(exist_ok=True)
     
-    # 2. Merge with existing training data
-    existing = pd.read_csv('data/processed/full_dataset.parquet')
-    new_data = query_firebase_labeled_data()
-    combined = pd.concat([existing, new_data])
+    # Archive current
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    for f in models_dir.glob('*'):
+        if f.is_file() and f.name != 'archive':
+            shutil.copy2(f, archive_dir / f"{f.stem}_{timestamp}{f.suffix}")
     
-    # 3. Retrain XGBoost (use saved best params)
-    with open('models/best_xgb_params.json') as f:
-        best_params = json.load(f)
-    
-    model = train_xgboost(combined, best_params)
-    
-    # 4. Retrain Isolation Forest (normal data only)
-    normal_data = combined[combined['label'] == 0]
-    iso_forest = train_isolation_forest(normal_data)
-    
-    # 5. Save new models (versioned)
-    version = f"v{pd.Timestamp.now().strftime('%Y%m%d')}"
-    model.save_model(f'models/xgboost_model_{version}.json')
-    joblib.dump(iso_forest, f'models/isolation_forest_{version}.pkl')
-    
-    # 6. Update symlinks to latest
-    import os
-    os.symlink(f'xgboost_model_{version}.json', 'models/xgboost_model.json')
-    os.symlink(f'isolation_forest_{version}.pkl', 'models/isolation_forest.pkl')
-    
-    # 7. Publish model metadata to Firebase
-    db.child('models/metadata').update({
-        "active_xgboost": f"xgboost_{version}",
-        "last_trained": pd.Timestamp.now().isoformat(),
-        "accuracy": evaluate_accuracy(),
-        "training_samples": len(combined)
-    })
-    
-    print(f"Retraining complete: {version}")
-```
-
-### 2. Model Drift Monitoring
-
-```python
-# Monitor prediction confidence distribution
-def monitor_drift(detector, window=1000):
-    """Track prediction confidence over time"""
-    import collections
-    
-    if not hasattr(monitor_drift, 'confidence_history'):
-        monitor_drift.confidence_history = collections.deque(maxlen=window)
-    
-    # Called after each prediction
-    # detector.predict() returns 'confidence' in result
-    # Log to file or Firebase for alerting if mean confidence drops
-    
-    pass
-```
-
-### 3. Alerting on Performance Drop
-
-```python
-# In firebase_listener.py process_reading()
-# Track: if > 50% predictions are 'uncertain' or 'anomaly' in 1 hour
-# → Alert: "Model drift detected - retraining recommended"
+    # New model already in models/ from training
+    print(f"Archived previous models to {archive_dir}")
 ```
 
 ---
 
-## Complete File Checklist
+## Quick Reference: Training Commands
 
-After completing this guide, you should have:
+```bash
+# Google Colab (recommended)
+# 1. Open colab.research.google.com
+# 2. Upload water_meter_ml_training.ipynb
+# 3. Runtime → Change runtime type → GPU (T4)
+# 4. Runtime → Run all
 
-### Training Machine (Colab/Local)
-```
-training/
-├── water_meter_ml_training.ipynb    # Main notebook
-├── generate_synthetic_data.py       # Synthetic data
-├── features.py                      # Feature extraction
-├── tune_xgboost.py                  # Optuna tuning
-├── requirements.txt                 # Training deps
-└── models/                          # Exported models
-    ├── xgboost_model.json
-    ├── isolation_forest.pkl
-    ├── scaler.pkl
-    ├── iso_threshold.pkl
-    ├── feature_cols.pkl
-    └── metadata.json
-```
+# Local Jupyter
+cd training/
+jupyter notebook water_meter_ml_training.ipynb
 
-### RPi (Production)
-```
-rpi/
-├── app.py                           # Flask entry point
-├── firebase_listener.py             # Firebase polling
-├── ml_inference.py                  # XGBoost + IF inference
-├── alert_engine.py                  # Notifications
-├── api_endpoints.py                 # REST API
-├── models/                          # Copied from training
-│   ├── xgboost_model.json
-│   ├── isolation_forest.pkl
-│   ├── scaler.pkl
-│   ├── iso_threshold.pkl
-│   ├── feature_cols.pkl
-│   └── metadata.json
-├── templates/
-│   └── dashboard.html               # Bootstrap + Chart.js
-├── static/
-│   ├── css/dashboard.css
-│   └── js/dashboard.js
-├── requirements.txt                 # Production deps
-├── firebase_config.json             # Gitignored
-├── .env                             # Gitignored
-├── water-meter.service              # systemd
-└── retrain.py                       # Daily retraining
+# RPi inference test
+cd ~/wmldad/rpi
+source venv/bin/activate
+python -c "
+from ml_inference import load_deployment_package
+import numpy as np
+
+pkg = load_deployment_package('models')
+detector = pkg['detector']
+detector.warm_up()
+
+# Test normal
+normal = np.array([[2.5, 30, 14, 2, 1, 1.1, 0.5, 0, 0.1]], dtype=np.float32)
+print('Normal:', detector.predict(normal))
+
+# Test minor leak
+minor = np.array([[0.3, 600, 3, 1, 1, 1.5, 0.01, 1, -0.1]], dtype=np.float32)
+print('Minor leak:', detector.predict(minor))
+
+# Benchmark
+print('Benchmark:', detector.benchmark(100))
+"
 ```
 
 ---
 
-## Quick Reference Commands
+## License
 
-| Task | Command |
-|------|---------|
-| Start training (Colab) | Open `water_meter_ml_training.ipynb` → Runtime → Run all |
-| Generate synthetic data | `python training/generate_synthetic_data.py` |
-| Run Optuna tuning | `python training/tune_xgboost.py` |
-| Copy models to RPi | `scp -r models/ pi@water-meter.local:~/wmldad/rpi/` |
-| Install RPi deps | `cd rpi && source venv/bin/activate && pip install -r requirements.txt` |
-| Run Flask manually | `cd rpi && source venv/bin/activate && python app.py` |
-| Start service | `sudo systemctl start water-meter.service` |
-| View logs | `journalctl -u water-meter.service -f` |
-| Manual retrain | `cd rpi && source venv/bin/activate && python retrain.py` |
-| Benchmark inference | `curl http://localhost:5000/api/benchmark` |
-| Health check | `curl http://localhost:5000/api/health` |
+MIT
 
----
+## Author
 
-## Next Steps
-
-1. **Deploy hardware** — Wire ESP32 + 4× YF-S201 per [block-diagram.md](./block-diagram.md)
-2. **Flash firmware** — Upload ESP32 code per [esp32-firmware-complete-guide.md](./esp32-firmware-complete-guide.md)
-3. **Calibrate sensors** — Bucket test per [esp32-firmware-complete-guide.md#sensor-calibration-bucket-test](./esp32-firmware-complete-guide.md#sensor-calibration-bucket-test)
-4. **Train initial model** — Follow this guide with synthetic data
-5. **Deploy RPi backend** — Copy files, create service, test dashboard
-6. **Collect real data** — Run for 2 weeks, simulate leaks weekly
-7. **Retrain with real data** — Replace synthetic with labeled real data
-8. **Monitor & iterate** — Watch drift alerts, retrain monthly
-
----
-
-*Last updated: July 2026 | Target: Raspberry Pi OS Trixie 64-bit | XGBoost 2.x + scikit-learn 1.3 | Compatible with Pi 3B+/4/5*
+[qppd](https://github.com/qppd) — Quezon Province, Philippines

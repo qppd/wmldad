@@ -10,14 +10,13 @@
 
 1. [Phase 1: Parts & Tools](#phase-1-parts--tools)
 2. [Phase 2: Software Installation](#phase-2-software-installation)
-3. [Phase 3: Firebase Setup](#phase-3-firebase-setup)
-4. [Phase 4: Hardware Assembly](#phase-4-hardware-assembly)
-5. [Phase 5: ESP32 Firmware Upload](#phase-5-esp32-firmware-upload)
-6. [Phase 6: Sensor Calibration](#phase-6-sensor-calibration)
-7. [Phase 7: RPi Backend Setup](#phase-7-rpi-backend-setup)
-8. [Phase 8: ML Model Training](#phase-8-ml-model-training)
-9. [Phase 9: Testing the Full System](#phase-9-testing-the-full-system)
-10. [Phase 10: Enclosure & Deployment](#phase-10-enclosure--deployment)
+3. [Phase 3: Hardware Assembly](#phase-3-hardware-assembly)
+4. [Phase 4: ESP32 Firmware Upload](#phase-4-esp32-firmware-upload)
+5. [Phase 5: Sensor Calibration](#phase-5-sensor-calibration)
+6. [Phase 6: RPi Backend Setup](#phase-6-rpi-backend-setup)
+7. [Phase 7: ML Model Training](#phase-7-ml-model-training)
+8. [Phase 8: Testing the Full System](#phase-8-testing-the-full-system)
+9. [Phase 9: Enclosure & Deployment](#phase-9-enclosure--deployment)
 
 ---
 
@@ -52,7 +51,7 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
 | **Arduino IDE 2.x** | ESP32 build, upload, Serial Monitor | [arduino.cc](https://www.arduino.cc/en/software) |
 | **Python 3.11+** | ML training + backend | [python.org](https://www.python.org/) |
 | **Git** | Version control | [git-scm.com](https://git-scm.com/) |
-| **Google Chrome / Firefox** | Firebase console | — |
+| **Google Chrome / Firefox** | Dashboard access | — |
 | **RPi Account** | Local server | Already have one |
 
 ---
@@ -68,14 +67,14 @@ Check [BOM.md](./bom.md) for complete list with Shopee/Lazada links. Minimum ess
    - Add: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json`
    - Tools -> Board -> Boards Manager -> search **ESP32** -> install **ESP32 Arduino**
 4. Install required libraries via Library Manager (Tools -> Manage Libraries):
-   - `Firebase ESP Client` by mobizt
+   - `ArduinoJson` by Benoit Blanchon (v7+)
 
-> **Note:** `Firebase-ESP-Client` by Mobizt already bundles/handles JSON serialization internally. No separate `ArduinoJson` library installation needed.
+> **Note:** No Firebase-ESP-Client needed — we use plain USB Serial with ArduinoJson.
 
 ### Step 2.2: Install Python
 
 1. Download Python 3.11+ from python.org
-2. **Important:** Check  **"Add Python to PATH"** during installation
+2. **Important:** Check **"Add Python to PATH"** during installation
 3. Verify:
    ```bash
    python --version
@@ -93,89 +92,24 @@ cd wmldad
 ### Step 2.4: Install Python Dependencies (for ML Backend)
 
 ```bash
-cd training/
+cd rpi/
 pip install -r requirements.txt
 # or manually:
-pip install xgboost scikit-learn pandas numpy joblib flask pyrebase4
+pip install xgboost scikit-learn pandas numpy joblib flask pyserial
 ```
 
 ---
 
-## Phase 3: Firebase Setup
+## Phase 3: Hardware Assembly
 
-### Step 3.1: Create Firebase Project
-
-1. Go to [console.firebase.google.com](https://console.firebase.google.com/)
-2. Click **Create a project**
-3. Name: **water-meter-leak-detection** (or your preferred name)
-4. Disable Google Analytics (optional)
-5. Click **Create project**
-
-### Step 3.2: Enable Realtime Database
-
-1. In Firebase Console, go to **Build → Realtime Database**
-2. Click **Create Database**
-3. Choose location (closest to you — e.g., `asia-southeast1`)
-4. Start in **test mode** (we'll secure it later)
-5. Click **Enable**
-
-### Step 3.3: Create Authentication (Email/Password)
-
-1. Go to **Build → Authentication → Sign-in method**
-2. Click **Email/Password** → **Enable** → **Save**
-3. Go to **Users** tab → **Add user**
-   - Email: `esp32@your-project.iam.gserviceaccount.com`
-   - Password: Create a strong password
-   - Click **Add user**
-4. **Save these credentials** for firmware config:
-   ```
-   API Key (Web API Key): AIzaSy... (from Project Settings → General)
-   Database URL: https://your-project-default-rtdb.asia-southeast1.firebasedatabase.app/
-   User Email: esp32@your-project.iam.gserviceaccount.com
-   User Password: [the password you set]
-   ```
-
-### Step 3.4: Get Firebase Web Config (for Pyrebase4)
-
-1. Go to **Project Settings → General**
-2. Scroll to **Your apps** → click **Web app** (</>) icon
-3. Register app name: `water-meter-rpi`
-4. **Copy the config object** — save as `firebase_config.json`:
-   ```json
-   {
-     "apiKey": "AIzaSy...",
-     "authDomain": "your-project.firebaseapp.com",
-     "databaseURL": "https://your-project-default-rtdb.asia-southeast1.firebasedatabase.app",
-     "projectId": "your-project",
-     "storageBucket": "your-project.appspot.com",
-     "messagingSenderId": "123456789",
-     "appId": "1:123456789:web:abcdef123456"
-   }
-   ```
-5. This file will be used by Pyrebase4 on the RPi.
-
-> **Note:** No service account key needed for Pyrebase4 — it uses Email/Password authentication.
-
-### Step 3.5: Set Up Database Structure
-
-Create initial data manually or let the ESP32 create it automatically. To verify:
-
-1. In Firebase Console → Realtime Database → **Data** tab
-2. You should see the root node. When ESP32 starts pushing, it will appear automatically.
-
----
-
-## Phase 4: Hardware Assembly
-
-### Step 4.1: Prepare the Expansion Board
+### Step 3.1: Prepare the Expansion Board
 
 The ESP32 expansion board makes wiring much easier. It provides:
-
 - Labeled screw terminals for each GPIO pin
 - Power rails (5V and 3.3V)
 - Reset and BOOT buttons
 
-### Step 4.2: Connect One Flow Sensor (Test Circuit First)
+### Step 3.2: Connect One Flow Sensor (Test Circuit First)
 
 Before connecting all 4 sensors, test with just one:
 
@@ -190,7 +124,7 @@ YF-S201 Sensor          ESP32 Expansion Board
 
 **Note:** The YF-S201 Hall-effect sensor outputs a digital pulse signal. No external pull-up resistor or capacitor needed — connect signal wire directly to GPIO.
 
-### Step 4.3: Connect All 4 Sensors
+### Step 3.3: Connect All 4 Sensors
 
 Once the test circuit works, connect all sensors:
 
@@ -209,10 +143,9 @@ YF-S201 Sensor:
   Yellow → GPIO (26, 25, 33, or 32)
 ```
 
-### Step 4.5: Plumbing Setup
+### Step 3.4: Plumbing Setup
 
 For testing without actual plumbing:
-
 1. Connect flow sensors in series with a **garden hose or PVC pipe**
 2. Inlet sensor at the water source end
 3. Each fixture sensor followed by a check valve
@@ -225,28 +158,41 @@ For testing without actual plumbing:
 
 ---
 
-## Phase 5: ESP32 Firmware Upload
+## Phase 4: ESP32 Firmware Upload
 
-### Step 5.1: Configure Firmware
+### Step 4.1: Configure Firmware
 
 1. Open `src/config.example.h` in any text editor
 2. Create `src/config.h` (copy the example)
 3. Fill in your credentials:
 
 ```cpp
-// === WiFi ===
+// === Device Identity ===
+#define DEVICE_ID        "wmldad-001"
+#define FIRMWARE_VERSION "v3.0.0-usb"
+
+// === WiFi (for OTA + NTP only — not required for serial operation) ===
 #define WIFI_SSID        "YOUR_WIFI_NAME"
 #define WIFI_PASSWORD    "YOUR_WIFI_PASSWORD"
 
-// === Firebase ===
-#define FIREBASE_API_KEY       "AIzaSy..."  // From Firebase Project Settings
-#define FIREBASE_DATABASE_URL  "https://your-project.asia-southeast1.firebasedatabase.app"
-#define FIREBASE_USER_EMAIL    "esp32@your-project.iam.gserviceaccount.com"
-#define FIREBASE_USER_PASSWORD "your-password"
-#define DEVICE_ID              "wm_001"
+// === Sensor Calibration (PPL = Pulses Per Liter) ===
+// UPDATE AFTER BUCKET TEST!
+#define PPL_INLET        450
+#define PPL_FIXTURE1     450
+#define PPL_FIXTURE2     450
+#define PPL_FIXTURE3     450
+
+// === Sensor Pins ===
+#define PIN_INLET        26
+#define PIN_FIXTURE1     25
+#define PIN_FIXTURE2     33
+#define PIN_FIXTURE3     32
+
+// === Timing ===
+#define SEND_INTERVAL_MS 5000      // Serial output every 5 sec
 ```
 
-### Step 5.2: Upload Firmware
+### Step 4.2: Upload Firmware
 
 1. Connect ESP32 via USB cable
 2. In Arduino IDE, select your board:
@@ -261,32 +207,22 @@ For testing without actual plumbing:
    - Release EN, then release BOOT
    - Click Upload again
 
-### Step 5.3: Monitor Serial Output
+### Step 4.3: Monitor Serial Output
 
 1. Open **Tools -> Serial Monitor** (Ctrl+Shift+M)
-2. Set baud rate to **115200** (bottom-right of Serial Monitor window)
+2. Set baud rate to **921600** (bottom-right of Serial Monitor window)
 3. You should see:
    ```
-   Connecting to WiFi...
-   WiFi connected! IP: 192.168.1.100
-   Firebase initialized successfully
-   Starting stream on: /commands/wm_001
-   Sensor 0 (inlet): ISR attached on GPIO 26
-   Sensor 1 (fix1): ISR attached on GPIO 25
-   Sensor 2 (fix2): ISR attached on GPIO 33
-   Sensor 3 (fix3): ISR attached on GPIO 32
-   Reading: inlet=0.00 L/min fix1=0.00 L/min fix2=0.00 L/min fix3=0.00 L/min
-   Data uploaded to Firebase
+   {"status":"ready","device_id":"wmldad-001","firmware":"v3.0.0-usb"}
+   {"device_id":"wmldad-001","ts":123456,"sensor":1,"gpio":26,"pulses":127,"flow_rate_lpm":2.34,"volume_ml":456}
+   {"device_id":"wmldad-001","ts":123456,"sensor":2,"gpio":25,"pulses":89,"flow_rate_lpm":1.65,"volume_ml":321}
+   {"device_id":"wmldad-001","ts":123456,"sensor":3,"gpio":33,"pulses":0,"flow_rate_lpm":0.00,"volume_ml":0}
+   {"device_id":"wmldad-001","ts":123456,"sensor":4,"gpio":32,"pulses":203,"flow_rate_lpm":3.80,"volume_ml":720}
    ```
-
-### Step 5.4: Check Firebase
-
-1. Go to Firebase Console → Realtime Database
-2. You should see data appearing under `/readings/wm_001/`
 
 ---
 
-## Phase 6: Sensor Calibration
+## Phase 5: Sensor Calibration
 
 > Detailed procedure: [Calibration Guide](./esp32-firmware-complete-guide.md#sensor-calibration-bucket-test)
 
@@ -296,23 +232,23 @@ For testing without actual plumbing:
 2. **Connect:** Run water from faucet through the inlet sensor into the container
 3. **Open:** Turn on faucet at medium flow
 4. **Collect:** Exactly 5 liters
-5. **Read:** Get pulse count from Serial Monitor (command: `status`)
+5. **Read:** Get pulse count from Serial Monitor (watch `pulses` field)
 6. **Calculate:**
    ```
    Actual PPL = Total Pulse Count ÷ 5
    ```
-7. **Update:** Change `PULSE_PER_LITER` in `config.h`
-8. **Repeat** for each sensor
+7. **Update:** Change `PPL_INLET` in `config.h`
+8. **Repeat** for each sensor (move sensor to each fixture line)
 
 ---
 
-## Phase 7: RPi Backend Setup
+## Phase 6: RPi Backend Setup
 
 > **Detailed guide:** [RPi Backend App](./pi-complete-setup.md)
 
 ### Quick Setup
 
-1. **Get a Raspberry Pi 3B+/4/5** with Raspberry Pi OS (64-bit)
+1. **Get a Raspberry Pi 3B+/4/5** with Raspberry Pi OS (64-bit, Trixie/Debian 13)
 2. **SSH into the RPi** or connect a monitor/keyboard
 3. **Clone the project:**
    ```bash
@@ -325,33 +261,29 @@ For testing without actual plumbing:
    source venv/bin/activate
    pip install -r requirements.txt
    ```
-5. **Copy Firebase config:**
+5. **Configure serial port (udev rule):**
    ```bash
-   cp firebase_config.json rpi/
-   ```
-6. **Set environment variables:**
-   ```bash
-   export FIREBASE_EMAIL="esp32@your-project.iam.gserviceaccount.com"
-   export FIREBASE_PASSWORD="your-strong-password"
-   export DEVICE_ID="wm_001"
+   echo 'SUBSYSTEM=="tty", ATTRS{idVendor}=="10c4", ATTRS{idProduct}=="ea60", SYMLINK+="ttyESP32", MODE="0666", GROUP="dialout"' | sudo tee /etc/udev/rules.d/99-esp32.rules
+   sudo udevadm control --reload-rules
+   sudo udevadm trigger
    ```
 6. **Run the Flask app:**
    ```bash
    python app.py
    ```
 7. **Test:** Open a browser and visit `http://<rpi-ip>:5000/`
-8. **Set up auto-start** (optional):
+8. **Set up auto-start (optional):**
    ```bash
    sudo cp water-meter.service /etc/systemd/system/
    sudo systemctl enable water-meter.service
    sudo systemctl start water-meter.service
    ```
 
-> See [RPi Backend App](./pi-complete-setup.md) for complete setup instructions, systemd service config, and remote access setup.
+> See [RPi Backend App](./pi-complete-setup.md) for complete setup instructions, systemd service config, touchscreen setup, and remote access setup.
 
 ---
 
-## Phase 8: ML Model Training
+## Phase 7: ML Model Training
 
 > Complete details: [ML Model](./ml-complete-guide.md)
 
@@ -383,27 +315,25 @@ Classification Report:
 Move trained models to the RPi (after training in Colab/Jupyter):
 ```bash
 # From Google Colab: download model files from the Files tab
-# (they appear as xgboost_leak_model.json, isolation_forest.pkl, scaler.pkl)
+# (they appear as xgboost_model.json, isolation_forest.pkl, scaler.pkl)
 
 # From Jupyter (local):
-cp training/xgboost_leak_model.json rpi/models/
+cp training/xgboost_model.json rpi/models/
 cp training/isolation_forest.pkl rpi/models/
 cp training/scaler.pkl rpi/models/
 ```
 
 ---
 
-## Phase 9: Testing the Full System
+## Phase 8: Testing the Full System
 
-### Test 1: ESP32 → Firebase
-
+### Test 1: ESP32 → USB Serial
 1. Turn water on through a fixture
-2. Check Firebase Console → Data tab → `/readings/wm_001/`
-3. Readings should update every 5 seconds
+2. Open Serial Monitor (921600 baud) on the RPi or computer
+3. JSON data should stream every 5 seconds
 4. Verify flow rate changes when you open/close faucets
 
-### Test 2: Firebase → RPi
-
+### Test 2: RPi Backend → Dashboard
 1. Open the RPi dashboard in a browser: `http://<rpi-ip>:5000/`
 2. Click Dashboard → should show latest readings
 3. Check the RPi logs:
@@ -412,55 +342,42 @@ cp training/scaler.pkl rpi/models/
    ```
 
 ### Test 3: ML Leak Detection
-
 1. Simulate a **minor leak**: partially open a valve to produce 0.1–0.5 L/min
 2. Wait 30+ seconds
 3. Check if an alert appears on the dashboard
-4. Check Firebase `/alerts/` path
+4. Check logs for detection
 
 ### Test 4: Command Flow
-
-1. In Firebase Console, write to `/commands/wm_001/cmd_test`:
-   ```json
-   {
-     "command": "calibrate",
-     "source": "test"
-   }
-   ```
-2. ESP32 should respond by entering calibration mode
-3. 7" LCD should show calibration status
+1. From dashboard, send a command (e.g., "calibrate")
+2. ESP32 should respond via Serial
+3. Check Serial Monitor for acknowledgment
 
 ### Test 5: Offline Mode
-
-1. Disconnect WiFi from router
-2. ESP32 should continue logging to SPIFFS
-3. Readings should buffer locally
-4. When WiFi reconnects, data should sync to Firebase
+1. Disconnect USB cable from RPi
+2. ESP32 should continue logging to SPIFFS (LED patterns show local alerts)
+3. Reconnect USB → data should appear on dashboard
 
 ---
 
-## Phase 10: Enclosure & Deployment
+## Phase 9: Enclosure & Deployment
 
 ### Permanent Wiring
-
 1. Solder components to perf board (instead of breadboard)
 2. Mount expansion board inside ABS enclosure
-3. Use cable glands for water sensor cables
+3. Use cable glands for water sensor cables + USB cable gland for RPi link
 4. Label all wires
 
 ### Final Calibration
-
 1. Install sensors in actual plumbing
 2. Perform bucket test on each sensor
-2. Update k-factor values in Firebase config
-3. Verify total consumption matches water bill
+3. Update PPL values in `config.h`, re-upload firmware
+4. Verify total consumption matches water bill
 
 ### Monitoring
-
-1. Set up dashboard as home page
-2. Configure in-app alerts (via Firebase /alerts)
+1. Set up dashboard as home page on touchscreen
+2. Configure in-app alerts (via dashboard /api/alerts)
 3. Set up a cron job on RPi for daily model retraining
-4. Check Firebase usage dashboard monthly
+4. Check system health periodically
 
 ---
 
@@ -474,7 +391,7 @@ cp training/scaler.pkl rpi/models/
 #   Sketch -> Upload  (Ctrl+U)
 
 # Arduino IDE: Serial Monitor
-#   Tools -> Serial Monitor  (Ctrl+Shift+M)  @ 115200 baud
+#   Tools -> Serial Monitor  (Ctrl+Shift+M)  @ 921600 baud
 
 # Train ML model (Google Colab)
 #   Open training/water_meter_ml_training.ipynb
@@ -483,6 +400,14 @@ cp training/scaler.pkl rpi/models/
 # Train ML model (Jupyter Notebook)
 cd training/
 jupyter notebook water_meter_ml_training.ipynb
+
+# RPi: Start Flask
+cd /home/pi/wmldad/rpi
+source venv/bin/activate
+python app.py
+
+# RPi: View logs
+journalctl -u water-meter.service -f
 ```
 
 ---
@@ -497,75 +422,3 @@ jupyter notebook water_meter_ml_training.ipynb
 
 ### Wiring Source File
 [Download .ckt file](../wiring/wmldad.ckt) — Open in [Cirkit Designer](https://app.cirkitdesigner.com/)
-
----
-
-## Project Structure Reference
-
-```text
-wmldad/
-├── docs/                     # Complete documentation (14 files)
-│   ├── system-architecture.md
-│   ├── flowchart.md
-│   ├── block-diagram.md
-│   ├── stacks.md
-│   ├── firebase-realtime-db.md
-│   ├── esp32-firmware-complete-guide.md
-│   ├── esp32-rpi-communication.md
-│   ├── ml-complete-guide.md
-│   ├── pi-complete-setup.md
-│   ├── bom.md
-│   └── troubleshooting.md
-├── src/                      # ESP32 firmware (Arduino C++ / .ino)
-│   ├── water-meter.ino          # Main Arduino sketch
-│   ├── config.h                 # WiFi, Firebase, sensor config
-│   ├── sensor_manager.h         # 4 sensor ISR management
-│   ├── flow_sensor.h            # Pulse counter class
-│   ├── firebase_client.h        # Firebase-ESP-Client wrapper
-│   ├── local_rules.h            # Offline leak detection
-│   ├── wifi_manager.h           # WiFi connect + reconnect
-│   ├── data_logger.h            # SPIFFS logging
-│   ├── alert_manager.h          # Buzzer + LED alerts
-│   ├── ntp_sync.h               # NTP time sync
-│   ├── ota_updater.h            # OTA firmware updates
-│   └── led_indicator.h          # Status LED patterns
-├── rpi/                  # RPi backend (Flask + ML)
-│   ├── app.py                # Flask web app
-│   ├── firebase_listener.py  # Pyrebase4 polling
-│   ├── ml_inference.py       # XGBoost + Isolation Forest
-│   ├── alert_engine.py       # In-app notification system
-│   ├── models/               # Trained models
-│   │   ├── xgboost_model.json
-│   │   └── isolation_forest.pkl
-│   ├── templates/            # Jinja2 HTML templates
-│   ├── static/               # CSS, JS, Chart.js
-│   ├── requirements.txt
-│   ├── firebase_config.json  # Pyrebase4 config (gitignored)
-│   └── water-meter.service   # systemd service file
-├── training/                  # ML training notebooks
-│   ├── water_meter_ml_training.ipynb   # Main training notebook (Colab/Jupyter)
-│   └── requirements.txt                # Dependencies for local runs
-├── model/                    # Trained models
-│   ├── xgboost_model.json
-│   └── isolation_forest.pkl
-├── wiring/                  # CAD, Cirkit Designer, enclosure designs
-│   ├── wmldad.ckt
-│   └── wmldad.png
-├── model/                  # 3D models (Fusion 360)
-│   ├── water-meter-fusion-360-file.f3d
-│   ├── water-meter-fixture.png
-│   ├── water-meter-fixture-1.png
-│   ├── water-meter-fixture-2.png
-│   ├── water-meter-fixture-3.png
-│   ├── water-meter-fixture-4.png
-│   ├── water-meter-fixture-5.png
-│   ├── water-meter-fixture-6.png
-│   ├── water-meter-fixture-7.png
-│   ├── water-meter-fixture-8.png
-│   ├── water-meter-fixture-9.png
-│   ├── water-meter-fixture-10.png
-│   ├── water-meter-fixture-11.png
-│   ├── water-meter-fixture-12.png
-│   └── water-meter-fixture-13.png
-└── README.md
-```

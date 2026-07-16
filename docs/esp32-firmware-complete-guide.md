@@ -1,10 +1,10 @@
-# ESP32 Firmware Complete Guide — Hardware to Deployment
+# ESP32 Firmware Complete Guide — USB Serial to RPi
 
 > **Target:** ESP32 Dev Module (38-pin) with Expansion Board  
 > **Sensors:** 4× YF-S201 Flow Sensors (1 inlet + 3 fixtures)  
-> **Communication:** HTTPS + SSE Stream to Firebase Realtime Database  
+> **Communication:** USB Serial (CDC/ACM) JSON Lines @ 921600 baud  
 > **IDE:** Arduino IDE 2.x on Raspberry Pi OS Trixie 64-bit (or Windows/macOS)  
-> **Library:** Firebase-ESP-Client by Mobizt (≥ 4.4.x)  
+> **Library:** ArduinoJson (≥ 7.x)  
 > **Audience:** Complete setup from hardware to deployed firmware
 
 ---
@@ -14,17 +14,16 @@
 1. [Hardware Overview](#hardware-overview)
 2. [Arduino IDE Installation on Raspberry Pi OS Trixie](#arduino-ide-installation-on-raspberry-pi-os-trixie)
 3. [ESP32 Board Support Configuration](#esp32-board-support-configuration)
-4. [Firebase Project Prerequisites](#firebase-project-prerequisites)
-5. [Firebase-ESP-Client Library Setup](#firebase-esp-client-library-setup)
-6. [Firmware Architecture & File Structure](#firmware-architecture--file-structure)
-7. [Main Loop & Sensor Management](#main-loop--sensor-management)
-8. [Firebase Integration: Upload, Stream, Commands](#firebase-integration-upload-stream-commands)
-9. [Local Leak Detection Rules (Offline Fallback)](#local-leak-detection-rules-offline-fallback)
-10. [Configuration (`config.h`)](#configuration-configh)
-11. [Build, Upload & Verify](#build-upload--verify)
-12. [Sensor Calibration (Bucket Test)](#sensor-calibration-bucket-test)
-13. [Firebase Security Rules](#firebase-security-rules)
-14. [Troubleshooting Common Issues](#troubleshooting-common-issues)
+4. [ArduinoJson Library Setup](#arduinojson-library-setup)
+5. [Firmware Architecture & File Structure](#firmware-architecture--file-structure)
+6. [Main Loop & Sensor Management](#main-loop--sensor-management)
+7. [USB Serial Communication](#usb-serial-communication)
+8. [Local Leak Detection Rules (Offline Fallback)](#local-leak-detection-rules-offline-fallback)
+9. [Configuration (`config.h`)](#configuration-configh)
+10. [Build, Upload & Verify](#build-upload--verify)
+11. [Sensor Calibration (Bucket Test)](#sensor-calibration-bucket-test)
+12. [OTA Firmware Updates](#ota-firmware-updates)
+13. [Troubleshooting Common Issues](#troubleshooting-common-issues)
 
 ---
 
@@ -37,7 +36,7 @@
 | **YF-S201 Flow Sensor** | 4 | 1/2" NPT, Hall effect, 5V, ~450 pulses/L |
 | **Check Valve 1/2"** | 3 | Brass/PVC, prevents backflow between fixtures |
 | **12V 5A PSU + LM2596S Buck** | 1 | 220V → 12V → 5V for ESP32 + sensors |
-| **IP67 ABS Enclosure** | 1 | 175×125×75mm, cable glands |
+| **IP67 ABS Enclosure** | 1 | 175×125×75mm, cable glands + USB gland |
 
 ### Pin Connections
 
@@ -73,6 +72,7 @@ arduino --version
 ```
 
 ### Launch
+
 ```bash
 # From terminal
 arduino
@@ -81,12 +81,14 @@ arduino
 ```
 
 ### Why pip?
+
 - Official Arduino distribution for Linux ARM64
 - Automatic updates via `pip install --upgrade arduino`
 - No Flatpak sandbox issues with serial ports
 - Works natively on Raspberry Pi OS Trixie 64-bit
 
 ### Alternative: Flatpak (if pip fails)
+
 ```bash
 flatpak install flathub cc.arduino.IDE2
 flatpak run cc.arduino.IDE2
@@ -136,55 +138,21 @@ Click **OK**.
 
 ---
 
-## Firebase Project Prerequisites
-
-> Complete **before** firmware configuration.
-
-### 1. Create Firebase Project
-1. Go to [Firebase Console](https://console.firebase.google.com)
-2. **Create a project** → Name: `water-meter-leak-detection`
-3. Disable Google Analytics (optional)
-4. Click **Create project**
-
-### 2. Enable Realtime Database
-1. **Build → Realtime Database** → **Create Database**
-2. Location: `asia-southeast1` (or closest)
-3. Start in **test mode** (secure later)
-
-### 3. Enable Authentication
-1. **Build → Authentication → Sign-in method**
-2. **Email/Password** → **Enable** → **Save**
-3. **Users → Add user**:
-   - Email: `esp32@your-project.iam.gserviceaccount.com`
-   - Password: `StrongPassword123!`
-   - **Save credentials** for `config.h`
-
-### 4. Get Config Values
-| Value | Location |
-|-------|----------|
-| **API Key** | Project Settings → General → Web API Key |
-| **Database URL** | Realtime Database → Data tab → URL (e.g., `https://my-project-default-rtdb.asia-southeast1.firebasedatabase.app`) |
-| **User Email/Password** | From step 3 |
-
-### 5. Create Web App Config (for RPi backend)
-1. **Project Settings → General → Your apps → Web (</>)**
-2. Register app: `water-meter-rpi`
-3. Copy `firebaseConfig` object → save as `rpi/firebase_config.json`
-
----
-
-## Firebase-ESP-Client Library Setup
+## ArduinoJson Library Setup
 
 ### Install via Library Manager
+
 1. **Tools → Manage Libraries...** (`Ctrl+Shift+I`)
-2. Search: **Firebase ESP Client**
-3. Click **Install** on **"Firebase ESP Client" by Mobizt** (v4.4.x+)
+2. Search: **ArduinoJson**
+3. Click **Install** on **"ArduinoJson by Benoit Blanchon"** (v7.x+)
 4. Wait for installation
 
-> 📸 **Screenshot Placeholder:** *Library Manager showing "Firebase ESP Client" by mobizt installing*
+> 📸 **Screenshot Placeholder:** *Library Manager showing "ArduinoJson" by Benoit Blanchon installing*
 
-### No ArduinoJson Needed
-> **Important:** Firebase-ESP-Client v4.4+ bundles JSON handling internally. Do NOT install ArduinoJson separately — it causes conflicts.
+### Version Note
+- **ArduinoJson v7+** uses `JsonDocument` (replaces `StaticJsonDocument`/`DynamicJsonDocument`)
+- Memory efficient, zero-copy parsing
+- No separate `Firebase-ESP-Client` needed — we use plain USB Serial
 
 ---
 
@@ -193,24 +161,25 @@ Click **OK**.
 ```
 src/
 ├── water-meter.ino          # Main sketch (setup + loop)
-├── config.h                 # ALL parameters (WiFi, Firebase, sensors, timing)
+├── config.h                 # ALL parameters (WiFi, sensors, timing)
 ├── config.example.h         # Template for git (copy to config.h)
 ├── sensor_manager.h         # 4× ISR pulse counters + flow calc
 ├── flow_sensor.h            # Single sensor class
-├── firebase_client.h        # Firebase-ESP-Client wrapper
+├── serial_comm.h            # USB Serial JSON sender/receiver
 ├── local_rules.h            # Offline leak detection
-├── wifi_manager.h           # WiFi connect + auto-reconnect
+├── wifi_manager.h           # WiFi connect + auto-reconnect (for OTA)
 ├── data_logger.h            # SPIFFS fallback logging
 ├── ntp_sync.h               # NTP time sync for timestamps
-├── ota_updater.h            # OTA firmware updates
+├── ota_updater.h            # OTA firmware updates via WiFi
 └── led_indicator.h          # Built-in LED (GPIO 2) status patterns
 ```
 
 ### Key Design Principles
+
 - **Non-blocking loop** — `delay(100)` max, all operations poll-based
-- **ISR-safe** — Pulse counters use `volatile` + `IRAM_ATTR` + debounce
+- **ISR-safe** — Pulse counters use `volatile` + `IRAM_ATTR` + 5ms debounce
 - **Modular** — Each subsystem in own header, single responsibility
-- **Fail-safe** — SPIFFS logging when Firebase unavailable
+- **Fail-safe** — SPIFFS logging when USB disconnected
 - **Observable** — LED patterns indicate state at a glance
 
 ---
@@ -220,31 +189,85 @@ src/
 ### Main Loop (`water-meter.ino`)
 
 ```cpp
-void loop() {
-    // 1. Check WiFi + Firebase connectivity
-    wifiManager.loop();
-    firebaseClient.loop();
+#include <Arduino.h>
+#include "config.h"
+#include "sensor_manager.h"
+#include "serial_comm.h"
+#include "local_rules.h"
+#include "wifi_manager.h"
+#include "data_logger.h"
+#include "led_indicator.h"
+#include "ota_updater.h"
+#include "ntp_sync.h"
 
+SensorManager sensorManager;
+SerialComm serialComm;
+LocalRules localRules;
+WiFiManager wifiManager;
+DataLogger dataLogger;
+LEDIndicator ledIndicator;
+OTAUpdater otaUpdater;
+NTPSync ntpSync;
+
+unsigned long lastSend = 0;
+unsigned long lastStatus = 0;
+
+void setup() {
+    Serial.begin(921600);
+    while (!Serial) delay(10);  // Wait for USB CDC
+    
+    // 1. Initialize sensors
+    sensorManager.begin();
+    
+    // 2. Initialize WiFi (for OTA + NTP only)
+    wifiManager.begin();
+    
+    // 3. Sync time via NTP
+    ntpSync.begin();
+    
+    // 4. Initialize SPIFFS logger
+    dataLogger.begin();
+    
+    // 5. Initialize OTA
+    otaUpdater.begin();
+    
+    // 6. LED ready pattern
+    ledIndicator.setPattern(LED_READY);
+    
+    Serial.println("{\"status\":\"ready\",\"device_id\":\"" DEVICE_ID "\",\"firmware\":\"" FIRMWARE_VERSION "\"}");
+}
+
+void loop() {
+    // 1. Check WiFi + OTA (non-blocking)
+    wifiManager.loop();
+    otaUpdater.loop();
+    
     // 2. Check for incoming commands from RPi
     if (Serial.available()) {
-        handleCommand();
+        serialComm.handleCommand();
     }
-
+    
     // 3. Read all pulse counters (non-blocking)
     sensorManager.readAll();
-
-    // 4. Periodic sensor data send
+    
+    // 4. Periodic sensor data send (every 5 sec)
     if (millis() - lastSend >= SEND_INTERVAL_MS) {
         sendSensorData();
         lastSend = millis();
     }
-
+    
     // 5. Local leak rules (runs every cycle)
     localRules.checkAll();
-
+    
     // 6. Status LED update
     ledIndicator.update();
-
+    
+    // 7. Periodic status heartbeat (every 30 sec)
+    if (millis() - lastStatus >= 30000) {
+        serialComm.sendStatus();
+        lastStatus = millis();
+    }
+    
     delay(100);  // Non-blocking cycle
 }
 ```
@@ -273,11 +296,16 @@ public:
         interrupts();
         
         // Calculate flow rate per sensor
+        float intervalSec = SEND_INTERVAL_MS / 1000.0;
         for (int i = 0; i < 4; i++) {
-            flowRate[i] = (pulseCountLocal[i] * 60.0) / (ppl[i] * (SEND_INTERVAL_MS / 1000.0));
+            flowRate[i] = (pulseCountLocal[i] * 60.0) / (ppl[i] * intervalSec);
             totalVolume[i] += pulseCountLocal[i] / ppl[i];
         }
     }
+
+    float getFlowRate(int index) { return flowRate[index]; }
+    float getVolume(int index) { return totalVolume[index]; }
+    uint32_t getPulses(int index) { return pulseCountLocal[index]; }
 
 private:
     static void IRAM_ATTR pulseISR(void* arg) {
@@ -289,8 +317,9 @@ private:
         }
     }
 
-    const uint8_t sensorPins[4] = {26, 25, 33, 32};
-    float ppl[4] = {450, 450, 450, 450};  // Overridden by config.h
+    const uint8_t sensorPins[4] = {PIN_INLET, PIN_FIXTURE1, PIN_FIXTURE2, PIN_FIXTURE3};
+    float ppl[4] = {PPL_INLET, PPL_FIXTURE1, PPL_FIXTURE2, PPL_FIXTURE3};  // From config.h
+    
     volatile uint32_t pulseCount[4] = {0};
     volatile uint32_t lastPulseTime[4] = {0};
     uint32_t pulseCountLocal[4] = {0};
@@ -301,64 +330,137 @@ private:
 
 ---
 
-## Firebase Integration: Upload, Stream, Commands
+## USB Serial Communication
 
-### Firebase Client Wrapper (`firebase_client.h`)
+### Serial Protocol
+
+**Baud Rate:** 921600  
+**Format:** JSON Lines (newline-delimited JSON)  
+**Encoding:** UTF-8
+
+### Data Frame (ESP32 → RPi, every 5 sec)
+
+```json
+{"device_id":"wmldad-001","ts":1703123456789,"sensor":1,"gpio":26,"pulses":127,"flow_rate_lpm":2.34,"volume_ml":456}
+{"device_id":"wmldad-001","ts":1703123456789,"sensor":2,"gpio":25,"pulses":89,"flow_rate_lpm":1.65,"volume_ml":321}
+{"device_id":"wmldad-001","ts":1703123456789,"sensor":3,"gpio":33,"pulses":0,"flow_rate_lpm":0.00,"volume_ml":0}
+{"device_id":"wmldad-001","ts":1703123456789,"sensor":4,"gpio":32,"pulses":203,"flow_rate_lpm":3.80,"volume_ml":720}
+```
+
+### Alert Frame (ESP32 Local Detection → RPi)
+
+```json
+{"device_id":"wmldad-001","ts":1703123456789,"type":"alert","level":"major_leak","sensor":3,"flow_rate_lpm":15.2,"duration_sec":45,"message":"Major leak detected on Fixture 2"}
+```
+
+### Status Frame (Periodic, every 30 sec)
+
+```json
+{"device_id":"wmldad-001","ts":1703123456789,"type":"status","uptime_sec":3600,"free_heap":245760,"wifi_rssi":-45,"sensors_ok":true}
+```
+
+### Command Frame (RPi → ESP32)
+
+```json
+{"cmd":"calibrate","sensor":1,"k_factor":7.5}
+{"cmd":"reset_counters"}
+{"cmd":"sleep","duration_sec":300}
+{"cmd":"reboot"}
+```
+
+### Serial Communication Handler (`serial_comm.h`)
 
 ```cpp
-class FirebaseClient {
+#include <ArduinoJson.h>
+
+class SerialComm {
 public:
-    bool begin() {
-        // Configure Firebase
-        config.api_key = API_KEY;
-        config.database_url = DATABASE_URL;
-        config.signer.test_mode = false;
-
-        // Auth: Email/Password
-        auth.user.email = USER_EMAIL;
-        auth.user.password = USER_PASSWORD;
-
-        // Token callback
-        config.token_status_callback = tokenStatusCallback;
-
-        // Initialize
-        Firebase.begin(&config, &auth);
-        Firebase.reconnectWiFi(true);
-
-        // Start stream listener for commands
-        Firebase.RTDB.beginStream(&stream, "/commands/" + String(DEVICE_ID));
-        return true;
-    }
-
-    void loop() {
-        // Handle stream events (commands from RPi)
-        if (Firebase.RTDB.readStream(&stream)) {
-            if (stream.dataType() == "json") {
-                handleCommand(stream.jsonObject());
-            }
+    void sendSensorData(const SensorManager& sensors, const char* deviceId) {
+        StaticJsonDocument<256> doc;
+        doc["device_id"] = deviceId;
+        doc["ts"] = millis();  // Use NTP time if available
+        
+        const char* sensorNames[4] = {"inlet", "bidet", "kitchen", "bathroom_shower"};
+        const uint8_t sensorPins[4] = {PIN_INLET, PIN_FIXTURE1, PIN_FIXTURE2, PIN_FIXTURE3};
+        
+        for (int i = 0; i < 4; i++) {
+            JsonObject s = doc[sensorNames[i]].to<JsonObject>();
+            s["gpio"] = sensorPins[i];
+            s["pulses"] = sensors.getPulses(i);
+            s["flow_rate_lpm"] = round(sensors.getFlowRate(i) * 100) / 100.0;
+            s["volume_ml"] = round(sensors.getVolume(i) * 1000);
         }
+        
+        serializeJson(doc, Serial);
+        Serial.println();  // Newline delimiter
     }
-
-    void pushReadings(const JsonObject& data) {
-        String path = "/readings/" + String(DEVICE_ID) + "/" + String(millis());
-        Firebase.RTDB.pushJSON(&fbdo, path.c_str(), data);
+    
+    void sendAlert(int sensorIdx, const char* level, float flowRate, int duration, const char* msg) {
+        StaticJsonDocument<256> doc;
+        doc["device_id"] = DEVICE_ID;
+        doc["ts"] = millis();
+        doc["type"] = "alert";
+        doc["level"] = level;
+        doc["sensor"] = sensorIdx;
+        doc["flow_rate_lpm"] = flowRate;
+        doc["duration_sec"] = duration;
+        doc["message"] = msg;
+        
+        serializeJson(doc, Serial);
+        Serial.println();
     }
-
-private:
-    void handleCommand(const FirebaseJson& json) {
-        String cmd;
-        json.get(cmd, "cmd");
-        if (cmd == "calibrate") {
+    
+    void sendStatus() {
+        StaticJsonDocument<256> doc;
+        doc["device_id"] = DEVICE_ID;
+        doc["ts"] = millis();
+        doc["type"] = "status";
+        doc["uptime_sec"] = millis() / 1000;
+        doc["free_heap"] = ESP.getFreeHeap();
+        doc["wifi_rssi"] = WiFi.RSSI();
+        doc["sensors_ok"] = true;
+        
+        serializeJson(doc, Serial);
+        Serial.println();
+    }
+    
+    void handleCommand() {
+        String line = Serial.readStringUntil('\n');
+        line.trim();
+        if (line.length() == 0) return;
+        
+        StaticJsonDocument<256> cmdDoc;
+        DeserializationError err = deserializeJson(cmdDoc, line);
+        if (err) return;
+        
+        const char* cmd = cmdDoc["cmd"];
+        if (!cmd) return;
+        
+        StaticJsonDocument<128> resp;
+        resp["cmd"] = cmd;
+        resp["status"] = "ok";
+        
+        if (strcmp(cmd, "calibrate") == 0) {
             sensorManager.startCalibration();
-        } else if (cmd == "reboot") {
+            resp["msg"] = "Calibration mode: run known volume";
+        } else if (strcmp(cmd, "reboot") == 0) {
+            resp["msg"] = "Rebooting...";
+            serializeJson(resp, Serial);
+            Serial.println();
             ESP.restart();
+        } else if (strcmp(cmd, "reset_counters") == 0) {
+            for (int i = 0; i < 4; i++) sensorManager.resetVolume(i);
+            resp["msg"] = "Counters reset";
+        } else if (strcmp(cmd, "set_ppl") == 0) {
+            int sensor = cmdDoc["sensor"] | 0;
+            float ppl = cmdDoc["ppl"] | 450.0;
+            sensorManager.setPPL(sensor, ppl);
+            resp["msg"] = "PPL updated (not persistent)";
         }
+        
+        serializeJson(resp, Serial);
+        Serial.println();
     }
-
-    FirebaseConfig config;
-    FirebaseAuth auth;
-    FirebaseData fbdo;
-    FirebaseData stream;
 };
 ```
 
@@ -366,8 +468,10 @@ private:
 
 ## Local Leak Detection Rules (Offline Fallback)
 
+Runs on ESP32 without RPi connection — critical for immediate alerting.
+
 ```cpp
-// local_rules.h — Runs on ESP32 without Firebase
+// local_rules.h — Runs on ESP32 without RPi
 class LocalRules {
 public:
     void checkAll() {
@@ -408,6 +512,8 @@ public:
         dataLogger.logAlert(type, detail);
         // LED pattern: fast blink = local alert
         ledIndicator.setPattern(LED_FAST_BLINK);
+        // Send via Serial to RPi
+        serialComm.sendAlert(/* sensor */ detail, type, sensorManager.getFlowRate(detail), sensorManager.getContinuousTime(detail), type);
     }
 };
 ```
@@ -422,18 +528,16 @@ public:
 
 #pragma once
 
-// ===== WiFi =====
+// ===== Device Identity =====
+#define DEVICE_ID        "wmldad-001"
+#define FIRMWARE_VERSION "v3.0.0-usb"
+
+// ===== WiFi (for OTA + NTP only — not required for serial operation) =====
 #define WIFI_SSID        "YourWiFiSSID"
 #define WIFI_PASSWORD    "YourWiFiPassword"
 
-// ===== Firebase =====
-#define API_KEY          "YOUR_WEB_API_KEY"
-#define DATABASE_URL     "https://your-project-default-rtdb.region.firebasedatabase.app"
-#define USER_EMAIL       "esp32@your-project.iam.gserviceaccount.com"
-#define USER_PASSWORD    "StrongPassword123!"
-#define DEVICE_ID        "wm_001"
-
 // ===== Sensor Calibration (PPL = Pulses Per Liter) =====
+// UPDATE AFTER BUCKET TEST!
 #define PPL_INLET        450   // Update after bucket test
 #define PPL_FIXTURE1     450
 #define PPL_FIXTURE2     450
@@ -446,7 +550,7 @@ public:
 #define PIN_FIXTURE3     32
 
 // ===== Timing =====
-#define SEND_INTERVAL_MS 5000      // Firebase upload every 5 sec
+#define SEND_INTERVAL_MS 5000      // Serial output every 5 sec
 #define CALIBRATION_TIMEOUT_MS 300000  // 5 min calibration window
 
 // ===== Local Leak Thresholds =====
@@ -476,21 +580,20 @@ public:
 
 #### If Upload Fails (Bootloader Mode):
 1. Hold **BOOT** button
-2. Press and release **EN** (Reset)
+2. Press and release **EN** (Reset) while holding BOOT
 3. Release **BOOT**
 4. Retry Upload (`Ctrl+U`)
 
 ### 4. Verify via Serial Monitor
-**Tools → Serial Monitor** (`Ctrl+Shift+M`) → **115200 baud**
+**Tools → Serial Monitor** (`Ctrl+Shift+M`) → **921600 baud**
 
 **Expected Output:**
 ```
-ESP32 Water Meter Ready
-WiFi connected: 192.168.1.100
-Firebase: Auth successful
-Firebase: Stream started
-Sensors: All 4 ISRs attached
-Loop: Running...
+{"status":"ready","device_id":"wmldad-001","firmware":"v3.0.0-usb"}
+{"device_id":"wmldad-001","ts":123456,"sensor":1,"gpio":26,"pulses":127,"flow_rate_lpm":2.34,"volume_ml":456}
+{"device_id":"wmldad-001","ts":123456,"sensor":2,"gpio":25,"pulses":89,"flow_rate_lpm":1.65,"volume_ml":321}
+{"device_id":"wmldad-001","ts":123456,"sensor":3,"gpio":33,"pulses":0,"flow_rate_lpm":0.00,"volume_ml":0}
+{"device_id":"wmldad-001","ts":123456,"sensor":4,"gpio":32,"pulses":203,"flow_rate_lpm":3.80,"volume_ml":720}
 ```
 
 ---
@@ -499,232 +602,69 @@ Loop: Running...
 
 > **Importance:** Accurate calibration is critical for leak detection. An uncalibrated sensor with ±10% error will trigger false positives or miss real leaks.
 
-### The K-Factor (PPL)
+### Quick Calibration (Bucket Test)
 
-```
-K-Factor (PPL) = Number of electrical pulses generated per liter of water
-Volume (L)     = Total Pulse Count ÷ K-Factor
-Flow Rate (L/min) = (Pulse Count × 60) ÷ (K-Factor × Interval Seconds)
-```
+1. **Prepare:** Get a 5L graduated container
+2. **Connect:** Run water from faucet through the inlet sensor into the container
+3. **Open:** Turn on faucet at medium flow
+4. **Collect:** Exactly 5 liters
+5. **Read:** Get pulse count from Serial Monitor (command: `status` or watch pulses field)
+6. **Calculate:**
+   ```
+   Actual PPL = Total Pulse Count ÷ 5
+   ```
+7. **Update:** Change `PPL_INLET` in `config.h`
+8. **Repeat** for each sensor (move sensor to each fixture line)
 
-Most YF-S201 sensors are rated at **450 PPL**, but actual values vary by ±10% due to:
-- Manufacturing tolerances (±5%)
-- Pipe diameter and water pressure
-- Flow rate (low vs high behave differently)
-- Temperature
-- Wear over time
+### Target
+< 3% error per sensor. Typical YF-S201: 400–480 PPL.
 
-### Calibration Method: Bucket Test (Per Sensor)
+---
 
-#### What You Need
-- **Graduated container** (1L, 5L, or 10L — bigger = more accurate)
-- **Smartphone stopwatch** (optional for flow rate)
-- **ESP32** flashed with firmware, Serial Monitor open (115200 baud)
-- **Water source** (faucet / hose)
-- **One YF-S201 sensor** at a time
+## OTA Firmware Updates
 
-#### Procedure (Per Sensor)
+Even though primary communication is USB Serial, WiFi + OTA allows remote firmware updates without physical access.
 
-**Step 1:** Connect only the sensor being calibrated.
+### OTA Updater (`ota_updater.h`)
 
-**Step 2:** Set initial K-factor in `config.h`:
 ```cpp
-#define PPL_INLET 450
-```
-Upload to ESP32.
+#include <ArduinoOTA.h>
 
-**Step 3:** Open Serial Monitor (115200 baud). Type `status` to see pulse count.
-
-**Step 4:** Run the test:
-1. Place container under faucet
-2. Connect flow sensor between faucet and container
-3. Open faucet at a **steady medium flow**
-4. Collect exactly **5 liters** (or more for accuracy)
-5. Close faucet
-6. Note the pulse count from Serial Monitor
-
-**Step 5:** Calculate:
-```
-Actual PPL = Total Pulse Count ÷ Volume Collected
-
-Example: 2,320 pulses for 5 liters
-Actual PPL = 2,320 ÷ 5 = 464 PPL
-```
-
-**Step 6:** Repeat 3 times and average:
-```
-Test 1: 2,320 pulses ÷ 5L = 464 PPL
-Test 2: 2,310 pulses ÷ 5L = 462 PPL 
-Test 3: 2,340 pulses ÷ 5L = 468 PPL
-
-Average PPL = (464 + 462 + 468) ÷ 3 = 464.7 → round to 465
-```
-
-**Step 7:** Update firmware:
-```cpp
-// Per-sensor calibration (config.h)
-#define PPL_INLET    465
-#define PPL_FIXTURE1 450
-#define PPL_FIXTURE2 458
-#define PPL_FIXTURE3 452
-#define PPL_FIXTURE4 460
-```
-
----
-
-### Two-Point Calibration (Best Accuracy)
-
-For different flow rates, the K-factor changes slightly:
-
-| Test | Flow Rate | Volume | Start Pulse | End Pulse | Calculated PPL |
-|------|-----------|--------|-------------|-----------|----------------|
-| Low | Drip (~0.3 L/min) | 2L | 0 | 920 | 460 |
-| Medium | Faucet (~6 L/min) | 5L | 0 | 2,310 | 462 |
-| High | Full open (~15 L/min) | 5L | 0 | 2,355 | 471 |
-
-**Recommended:** Use the **medium flow** PPL and apply a correction factor in code:
-```python
-if flow_rate < 1.0:
-    ppl = medium_ppl * 0.98
-elif flow_rate > 10.0:
-    ppl = medium_ppl * 1.02
-else:
-    ppl = medium_ppl
-```
-
----
-
-### Calibration Verification
-
-After calibration, verify accuracy:
-
-| Accuracy | Error Range | Impact on Leak Detection |
-|----------|-------------|-------------------------|
-| Excellent | < ±2% | Reliable leak detection |
-| Good | ±2% – ±5% | Minor false positive risk |
-| Acceptable | ±5% – ±10% | May miss small leaks |
-| Needs work | > ±10% | Unreliable for leak detection |
-
-**Formula:**
-```
-Error % = |(Measured Volume - Actual Volume) ÷ Actual Volume| × 100
-```
-
----
-
-### Calibration via Firebase (Optional)
-
-If you've implemented the calibration endpoint:
-
-```json
-// POST to Flask API or write to Firebase:
-{
-  "command": "calibrate",
-  "sensor_id": "inlet",
-  "known_volume": 5.0
-}
-```
-
-1. Run exactly 5L through the inlet sensor
-2. The system calculates the K-factor and updates `/config/device_id/pulse_per_liter_inlet`
-
----
-
-### Calibration Log Template
-
-```
-Sensor Calibration Log
-──────────────────────
-Date: 2026-07-10
-Device: wm_001
-
-INLET SENSOR (GPIO 26):
-  Test 1: 2320 pulses / 5L = 464 PPL
-  Test 2: 2310 pulses / 5L = 462 PPL
-  Test 3: 2340 pulses / 5L = 468 PPL
-  Average: 465 PPL ← USE THIS
-
-FIXTURE 1 (GPIO 25):
-  Test 1: 2250 pulses / 5L = 450 PPL
-  Average: 450 PPL
-
-FIXTURE 2 (GPIO 33):
-  Test 1: 2290 pulses / 5L = 458 PPL
-  Average: 458 PPL
-
-FIXTURE 3 (GPIO 32):
-  Test 1: 2260 pulses / 5L = 452 PPL
-  Average: 452 PPL
-
-FIXTURE 4 (GPIO 32):
-  Test 1: 2300 pulses / 5L = 460 PPL
-  Average: 460 PPL
-```
-
----
-
-### Common Pitfalls
-
-| Problem | Why | Fix |
-|---------|-----|-----|
-| Air bubbles in sensor | Gives wrong pulse count | Tap sensor, purge air first |
-| Sensor installed backwards | Zero reading | Arrow must point WITH flow |
-| Low flow gives different PPL | Non-linear sensor response | Use 2-point calibration |
-| Temperature change | K-factor shifts slightly | Re-calibrate seasonally |
-| Using different pipe diameter | Changes flow profile | Calibrate with actual plumbing |
-| Multiple sensors sharing same calibration | Each sensor is different | Calibrate EACH sensor individually |
-
----
-
-### Quick Reference
-
-| Sensor Model | Nominal PPL (start here) | Typical Range |
-|-------------|-------------------------|---------------|
-| YF-S201 | 450 | 440–480 |
-| YF-S401 | 450 | 440–470 |
-| YF-B1 | 2760 | 2600–2900 |
-| Generic clone | 450 | 420–500 (test carefully) |
-
-> **Tip:** After calibration, write the PPL value on each sensor with a permanent marker so you don't forget which sensor has which value!
-
----
-
-## Firebase Security Rules
-
-```json
-{
-  "rules": {
-    "readings": {
-      "$device_id": {
-        "$timestamp": {
-          ".read": "auth != null",
-          ".write": "auth.uid == $device_id || auth.uid == 'rpi-backend'"
-        }
-      }
-    },
-    "commands": {
-      "$device_id": {
-        ".read": "auth != null && auth.uid == $device_id",
-        ".write": "auth.uid == 'rpi-backend' || auth.uid == 'dashboard-admin'"
-      }
-    },
-    "alerts": {
-      "$device_id": {
-        ".read": "auth != null",
-        ".write": "auth.uid == 'rpi-backend' || auth.uid == $device_id"
-      }
-    },
-    "devices": {
-      ".read": "auth != null",
-      "$device_id": {
-        ".write": "auth.uid == $device_id || auth.uid == 'dashboard-admin'"
-      }
+class OTAUpdater {
+public:
+    void begin() {
+        ArduinoOTA.setHostname(DEVICE_ID);
+        ArduinoOTA.setPassword(OTA_PASSWORD);  // Define in config.h
+        
+        ArduinoOTA.onStart([]() {
+            String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
+            Serial.println("{\"ota\":\"start\",\"type\":\"" + type + "\"}");
+        });
+        ArduinoOTA.onEnd([]() {
+            Serial.println("{\"ota\":\"end\"}");
+        });
+        ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+            Serial.printf("{\"ota\":\"progress\",\"pct\":%u}\n", (progress / (total / 100)));
+        });
+        ArduinoOTA.onError([](ota_error_t error) {
+            Serial.printf("{\"ota\":\"error\",\"code\":%u}\n", error);
+        });
+        
+        ArduinoOTA.begin();
     }
-  }
-}
+    
+    void loop() {
+        ArduinoOTA.handle();
+    }
+};
 ```
 
-**Apply:** Firebase Console → Realtime Database → Rules → Paste → **Publish**
+### Trigger OTA Update
+```bash
+# From any computer on same network
+arduino-cli upload -p wmldad-001.local -b esp32:esp32:esp32 --port network
+# Or use Arduino IDE: Tools → Port → Network ports → wmldad-001
+```
 
 ---
 
@@ -732,44 +672,40 @@ FIXTURE 4 (GPIO 32):
 
 | Issue | Cause | Fix |
 |-------|-------|-----|
-| **Upload fails: "Timed out waiting for packet header"** | Not in bootloader mode | Hold BOOT → Press EN → Release EN → Release BOOT → Upload |
-| **Upload fails: "Permission denied /dev/ttyUSB0"** | User not in dialout group | `sudo usermod -a -G dialout $USER && newgrp dialout` |
-| **Serial Monitor shows garbage** | Wrong baud rate | Set **115200** in Serial Monitor (bottom-right) |
-| **Firebase: "Permission denied" / 403** | Security rules or auth | Check rules; verify email/password in `config.h` |
-| **Firebase: "Token generation failed"** | Wrong API Key | Copy Web API Key from Project Settings → General |
-| **WiFi connects but Firebase fails** | DNS/time issues | Check NTP sync; try `WiFi.config(ip, gateway, subnet, dns1, dns2)` |
-| **Sensor reads 0 always** | Wiring or GPIO wrong | Check `config.h` pins match wiring; verify 5V/GND to sensors |
-| **LED shows sensor fault** | Fixture reads 0 while inlet flows | Check sensor wiring; verify check valve direction (arrow = flow) |
-| **"ArduinoJson not found" error** | Old code expects separate lib | Firebase-ESP-Client 4.4+ includes JSON — remove ArduinoJson from lib_deps |
+| **No Serial output** | Baud rate mismatch | Set Serial Monitor to **921600** |
+| **Upload fails** | Not in bootloader | Hold BOOT → Press EN → Release BOOT → Upload |
+| **JSON parse errors** | Buffer overflow | Increase `StaticJsonDocument` size |
+| **Flow rate reads 0** | Wrong GPIO pin | Verify pin in `config.h` matches wiring |
+| **WiFi won't connect** | Wrong credentials | Check `WIFI_SSID`/`WIFI_PASSWORD` in `config.h` |
+| **OTA not showing** | mDNS not working | Use IP address; install Bonjour on Windows |
+| **SPIFFS not mounting** | Partition scheme | Use "Default 4MB with spiffs" partition |
+| **Pulses too high/low** | Uncalibrated | Run bucket test, update PPL in `config.h` |
 
 ---
 
-## Quick Reference Card
+## LED Indicator Reference
 
-| Task | Command / Menu |
-|------|----------------|
-| Open Preferences | File → Preferences (`Ctrl+,`) |
-| Board Manager | Tools → Board → Boards Manager (`Ctrl+Shift+B`) |
-| Library Manager | Tools → Manage Libraries (`Ctrl+Shift+I`) |
-| Select Board | Tools → Board → ESP32 Arduino → **ESP32 Dev Module** |
-| Select Port | Tools → Port → `/dev/ttyUSB0` or `COMx` |
-| Verify | Sketch → Verify/Compile (`Ctrl+R`) |
-| Upload | Sketch → Upload (`Ctrl+U`) |
-| Serial Monitor | Tools → Serial Monitor (`Ctrl+Shift+M`) |
-| Baud Rate | **115200** (must match `Serial.begin(115200)`) |
-| Bootloader Mode | Hold BOOT → Press EN → Release EN → Release BOOT |
-| Erase Flash (clean) | `esptool.py --port /dev/ttyUSB0 erase_flash` |
+| LED Pattern | Meaning |
+|-------------|---------|
+| Solid green | Normal operation, all OK |
+| Blink green (1s) | WiFi connecting |
+| Blink blue (fast) | Transmitting serial data |
+| Solid yellow | Minor leak detected (alert) |
+| Solid red | Major leak detected (critical) |
+| Red flash | Emergency — urgent action needed |
+| Blink white (3x + pause) | Successful data send |
+| Blink red (5x + pause) | Send failed / error |
+| Off | Deep sleep or no power |
 
 ---
 
-## Next Steps
+## Checklist Before Panicking
 
-After firmware deployed:
-1. **Calibrate sensors** — 5L bucket test (this guide, above)
-2. **Deploy RPi backend** — [Pi Complete Setup](./pi-complete-setup.md)
-3. **Train ML models** — [Complete ML Guide](./ml-complete-guide.md)
-4. **Monitor dashboard** — `http://water-meter.local:5000/`
-
----
-
-*Last updated: July 2026 | Tested with ESP32 Core 3.x, Firebase-ESP-Client 4.4.x, Arduino IDE 2.3.x | Compatible with ESP32 Dev Module, ESP32-S3, ESP32-C3*
+- [ ] Is ESP32 getting power? (LED on?)
+- [ ] Is USB cable a **data cable**? (not charge-only)
+- [ ] Is Serial Monitor baud set to **921600**?
+- [ ] Is the flow sensor arrow pointing **WITH** the water flow?
+- [ ] Are WiFi SSID and password correct? (for OTA only)
+- [ ] Is `PPL` calibrated for each sensor?
+- [ ] Is ArduinoJson v7+ installed?
+- [ ] Is board set to **ESP32 Dev Module**?
