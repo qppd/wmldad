@@ -176,8 +176,8 @@ Each YF-S201 sensor has 3 wires: **Red (VCC)**, **Black (GND)**, **Yellow (Signa
 
 ```mermaid
 graph LR
-    AC[220V AC<br/>Outlet] --> PSU12[12V 5A<br/>Switching PSU<br/>(S-60-12 / LRS-60-12)]
-    PSU12 --> Buck[LM2596S<br/>12V → 5V<br/>Buck Converter]
+    AC[220V AC<br/>Outlet] --> PSU12[12V 5A Switching PSU<br/>(S-60-12 / LRS-60-12)]
+    PSU12 --> Buck[LM2596S<br/>12V to 5V<br/>Buck Converter]
     Buck --> ESPV[ESP32 VIN<br/>(5V)]
     Buck --> SensorV[Flow Sensors<br/>VCC (5V)]
 ```
@@ -185,8 +185,8 @@ graph LR
 </details>
 
 > **Power Architecture:**
-> - **220V AC** → **12V 5A Switching Power Supply (S-60-12 / LRS-60-12)** 
-> - **12V** → **LM2596S Buck Converter** → **5V** for ESP32 + sensors
+> - **220V AC** to **12V 5A Switching Power Supply (S-60-12 / LRS-60-12)**
+> - **12V** to **LM2596S Buck Converter** to **5V** for ESP32 + sensors
 > - 12V rail available for future 12V components if needed
 
 ---
@@ -199,53 +199,43 @@ graph LR
 <summary><b> Mermaid Source</b> (click to expand)</summary>
 
 ```mermaid
-graph TB
-    subgraph "Enclosure"
-        ESP32Board["ESP32 +<br/>Expansion Board"]
-        BuckConv["LM2596S<br/>Buck Converter<br/>(12V→5V)"]
-        Terminal["Terminal Block<br/>Sensor Inputs<br/>(4 sensors)"]
-        PSU12["12V 5A<br/>PSU (mounted)"]
-    end
-    
-    PSU12 --> BuckConv
-    BuckConv --> ESP32Board
-    BuckConv --> Terminal
-    ESP32Board --> Terminal
+graph TD
+    Enclosure[Waterproof ABS Enclosure Box<br/>IP67 175x125x75mm<br/>with cable glands for<br/>waterproof sensor cable entry]
 ```
 
 </details>
 
-> **Enclosure:** Waterproof ABS Enclosure Box IP67 175×125×75mm with cable glands for waterproof sensor cable entry.
+> **Enclosure:** Waterproof ABS Enclosure Box IP67 175x125x75mm with cable glands for waterproof sensor cable entry.
 
 ---
 
-## Pinout Reference (ESP32 38-Pin)
+## Pinout Reference (ESP32 DevKit V1 38-Pin)
 
 ```
                    ┌─────────────┐
              EN ──┤ 1         38├── VBAT
-           GPIO36─┤ 2         37├── GPIO23
-           GPIO39─┤ 3         36├── GPIO22
-           GPIO34─┤ 4  E   P  35├── TXD0
-           GPIO35─┤ 5  S   3  34├── RXD0
-           GPIO32─┤ 6   P   2  33├── GPIO21
-           GPIO33─┤ 7   3   1  32├── GPIO19
-           GPIO25─┤ 8   8      31├── GPIO18
-           GPIO26─┤ 9          30├── GPIO5
-           GPIO27─┤10          29├── GPIO17 (TXD2)
-           GPIO14─┤11          28├── GPIO16 (RXD2)
-           GPIO12─┤12          27├── GPIO4
-           GPIO13─┤13          26├── GPIO0 (BOOT)
-              GND ─┤14          25├── GPIO2 (LED)
-           GPIO15─┤15          24├── GPIO15
-           ───────┤16          23├── ───────
-              3.3V ─┤17          22├── ───────
-              5V  ─┤18          21├── ───────
-              GND ─┤19          20├── ───────
+           GPIO36─┤ 2         37├── GPIO15 (HSPI_CS)
+           GPIO39─┤ 3         36├── GPIO2 (LED)
+           GPIO34─┤ 4         35├── GPIO0 (BOOT)
+           GPIO35─┤ 5         34├── GPIO4
+           GPIO32─┤ 6         33├── GPIO16 (RXD2)
+           GPIO33─┤ 7         32├── GPIO17 (TXD2)
+           GPIO25─┤ 8         31├── GPIO5
+           GPIO26─┤ 9         30├── GPIO18
+           GPIO27─┤ 10        29├── GPIO19
+           GPIO14─┤ 11        28├── GPIO21
+           GPIO12─┤ 12        27├── GPIO22
+           GPIO13─┤ 13        26├── GPIO23
+              GND─┤ 14        25├── RXD0 (GPIO3)
+           GPIO15─┤ 15        24├── TXD0 (GPIO1)
+              GND─┤ 16        23├── (NC)
+            3.3V ─┤ 17        22├── (NC)
+             5V  ─┤ 18        21├── (NC)
+              GND─┤ 19        20├── GND
                    └─────────────┘
 ```
 
-> Flow sensors on **GPIO 26, 25, 33, 32** — direct connection, no pull-up resistors or capacitors needed (YF-S201 outputs digital pulses).
+> **Flow sensors on GPIO 26, 25, 33, 32** (physical pins 9, 8, 7, 6) — direct connection, no pull-up resistors or capacitors needed (YF-S201 outputs digital pulses).
 
 ---
 
